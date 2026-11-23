@@ -2,6 +2,8 @@ import { useEffect, useRef } from "react";
 import Phaser from "phaser";
 import type { GameState } from "@aftermaze/engine";
 import { ArenaScene, CELL } from "./ArenaScene";
+import { SKIN_COLORS } from "../chain/config";
+import { useSave } from "../store";
 
 interface Props {
   frames: GameState[];
@@ -13,6 +15,8 @@ interface Props {
 /** Mounts a Phaser game sized to the maze and feeds it engine frames. */
 export function ArenaCanvas({ frames, index, tickMs, label }: Props) {
   const host = useRef<HTMLDivElement>(null);
+  const skin = useSave().equippedSkin;
+  const novaColor = skin && SKIN_COLORS[skin] ? parseInt(SKIN_COLORS[skin].slice(1), 16) : 0x22e4f5;
   const sceneRef = useRef<ArenaScene | null>(null);
   const shown = useRef(-1);
   const first = frames[0];
@@ -21,7 +25,7 @@ export function ArenaCanvas({ frames, index, tickMs, label }: Props) {
 
   useEffect(() => {
     if (!host.current) return;
-    const scene = new ArenaScene();
+    const scene = new ArenaScene(novaColor);
     sceneRef.current = scene;
     shown.current = -1;
     const game = new Phaser.Game({
@@ -42,7 +46,7 @@ export function ArenaCanvas({ frames, index, tickMs, label }: Props) {
       game.destroy(true);
     };
     // A new maze (different size or seed) gets a fresh game.
-  }, [w, h, first?.config.seed, first?.config.level]);
+  }, [w, h, first?.config.seed, first?.config.level, novaColor]);
 
   useEffect(() => {
     const scene = sceneRef.current;

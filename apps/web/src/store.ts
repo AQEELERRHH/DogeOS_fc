@@ -51,6 +51,10 @@ export interface SaveData {
   survivalLevel: number;
   bests: Partial<Record<Mode, number>>;
   endlessBestFloors: number;
+  /** Cosmetic item id equipped (ownership is checked on-chain before equipping). */
+  equippedSkin: string | null;
+  /** Special Maze entries used, per wallet (purchases are on-chain; usage is tracked here until the game server exists). */
+  specialUsed: Record<string, number>;
 }
 
 const KEY = "aftermaze.save.v1";
@@ -66,6 +70,8 @@ const empty = (): SaveData => ({
   survivalLevel: 1,
   bests: {},
   endlessBestFloors: 0,
+  equippedSkin: null,
+  specialUsed: {},
 });
 
 function load(): SaveData {
@@ -108,6 +114,8 @@ export const getSave = () => state;
 export function createAgent(name: string, personality: Personality) {
   set({
     ...empty(),
+    equippedSkin: state.equippedSkin,
+    specialUsed: state.specialUsed,
     agent: { name: name.trim().slice(0, 24) || "NOVA", personality, createdAt: Date.now() },
     policies: newPolicyHistory(personality),
   });
@@ -183,4 +191,17 @@ export function recordEndless(floorsCleared: number) {
 
 export function todayUtc(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+export function equipSkin(itemId: string | null) {
+  set({ ...state, equippedSkin: itemId });
+}
+
+export function specialUsedBy(address: string): number {
+  return state.specialUsed[address.toLowerCase()] ?? 0;
+}
+
+export function consumeSpecialEntry(address: string) {
+  const k = address.toLowerCase();
+  set({ ...state, specialUsed: { ...state.specialUsed, [k]: (state.specialUsed[k] ?? 0) + 1 } });
 }
