@@ -11,7 +11,9 @@ import {
 } from "@aftermaze/engine";
 import { ArenaCanvas } from "../game/ArenaCanvas";
 import { learnInWorker, runInWorker } from "../simClient";
-import { type MatchRecord, currentPolicy, getSave, recordEndless, recordMatch, todayUtc, useSave } from "../store";
+import { type MatchRecord, consumeSpecialEntry, currentPolicy, getSave, recordEndless, recordMatch, specialUsedBy, todayUtc, useSave } from "../store";
+import { useWallet } from "../wallet/WalletContext";
+import { useChain } from "../wallet/useChain";
 import { Eyebrow, MODE_LABEL, Page, Panel, Stat, btnGhost, btnPrimary, pad } from "../components/ui";
 
 const SPEEDS = [
@@ -50,7 +52,7 @@ export function Arena() {
   const finished = useRef<Run | null>(null);
 
   const start = useCallback(
-    async (config: MatchConfig, opts: { hp?: number; replayOf?: MatchRecord; endless?: Run["endless"] } = {}) => {
+    async (config: MatchConfig, opts: { hp?: number; replayOf?: MatchRecord; endless?: Run["endless"]; entryOf?: string } = {}) => {
       if (busy.current) return;
       busy.current = true;
       try {
@@ -60,6 +62,7 @@ export function Arena() {
         const result = await runInWorker(config, policy, opts.hp);
         const frames = [...replayFrames(config, result.actions, opts.hp)];
         const verified = opts.replayOf ? result.replayHash === opts.replayOf.replayHash : null;
+        if (opts.entryOf) consumeSpecialEntry(opts.entryOf);
         setRun({ result, frames, replayOf: opts.replayOf ?? null, verified, endless: opts.endless ?? null });
         setIdx(0);
         setPaused(false);
@@ -148,6 +151,9 @@ export function Arena() {
           onDaily={() => start(dailyConfig(todayUtc()))}
           onSurvival={() => start(buildConfig({ mode: "survival", seed: `survival:${save.survivalLevel}:${Date.now()}`, level: save.survivalLevel }))}
           onTraining={() => start(buildConfig({ mode: "training", seed: `training:${Date.now()}`, level: trainingLevel }))}
+          onSpecial={(key, address) =>
+            start(buildConfig({ mode: "special", seed: `special:${key}:${Date.now()}`, level: Math.max(4, save.survivalLevel), special: key }), { entryOf: address })
+          }
           onEndless={() => {
             const runId = `endless:${Date.now()}`;
             start(buildConfig({ mode: "endless", seed: `${runId}:floor0`, level: 1 }), { endless: { runId, floor: 0, cleared: 0 } });
@@ -317,6 +323,7 @@ interface MenuProps {
   onSurvival: () => void;
   onTraining: () => void;
   onEndless: () => void;
+  onSpecial: (key: string, address: string) => void;
 }
 
 function Menu(p: MenuProps) {
@@ -358,20 +365,7 @@ function Menu(p: MenuProps) {
         </div>
       </div>
 
-      <section className="flex flex-col gap-3">
-        <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <Eyebrow className="text-amber">SPECIAL MAZES · DOGE</Eyebrow>
-          <span className="text-sm text-muted">Entry with DOGE arrives with wallet login (next update).</span>
-        </div>
-        <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(220px,1fr))]">
-          {Object.values(SPECIAL_MAZES).map((m) => (
-            <div key={m.key} className="flex flex-col gap-2 border border-line bg-surface p-4 opacity-80">
-              <span className="font-semibold">{m.name}</span>
-              <span className="text-sm text-soft">{m.description}</span>
-            </div>
-          ))}
-        </div>
-      </section>
+      <SpecialMazes disabled={disabled} onSpecial={p.onSpecial} />
 
       {recent.length > 0 && (
         <Panel className="flex flex-col gap-3">
@@ -386,6 +380,46 @@ function Menu(p: MenuProps) {
         </Panel>
       )}
     </>
+  );
+}
+
+function SpecialMazes({ disabled, onSpecial }: { disabled: boolean; onSpecial: (key: string, address: string) => void }) {
+  const wallet = useWallet();
+  const chain = useChain();
+  useSave(); // re-render when entries are used
+  const used = wallet.address ? specialUsedBy(wallet.address) : 0;
+  const available = Math.max(0, Number(chain.specialEntries) - used);
+  return (
+    <section className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <Eyebrow className="text-amber">SPECIAL MAZES · DOGE</Eyebrow>
+        <span className="text-sm text-muted">
+          {!wallet.connected ? (
+            "Connect a wallet to use Special Maze entries."
+          ) : (
+            <>
+              <span className="text-amber">{available} entr{available === 1 ? "y" : "ies"} available</span> · <Link to="/shop">Buy entries</Link>
+            </>
+          )}
+        </span>
+      </div>
+      <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(220px,1fr))]">
+        {Object.values(SPECIAL_MAZES).map((m) => (
+          <div key={m.key} className="flex flex-col gap-2 border border-line bg-surface p-4">
+            <span className="font-semibold">{m.name}</span>
+            <span className="flex-grow text-sm text-soft">{m.description}</span>
+            <button
+              type="button"
+              className="mt-1 inline-flex min-h-11 items-center justify-center self-start bg-amber px-4 font-pixel text-[10px] text-bg"
+              disabled={disabled || !wallet.address || available < 1}
+              onClick={() => wallet.address && onSpecial(m.key, wallet.address)}
+            >
+              USE 1 ENTRY
+            </button>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 

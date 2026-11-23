@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Link, NavLink } from "react-router-dom";
 import { useSave } from "../store";
+import { useWallet } from "../wallet/WalletContext";
 
 export function Logo() {
   return (
@@ -32,13 +33,16 @@ export function GameHeader() {
             <NavLink to="/shop" className={navCls}>Shop</NavLink>
           </nav>
         </div>
-        {save.agent && (
-          <div className="flex items-center gap-3 font-mono text-[13px]">
-            <span className="size-3 bg-cyan shadow-[0_0_8px_#22E4F5]" aria-hidden="true" />
-            <span>{save.agent.name}</span>
-            <span className="text-muted">· strategy v{save.policies?.active ?? 1}</span>
-          </div>
-        )}
+        <div className="flex flex-wrap items-center gap-4">
+          {save.agent && (
+            <div className="flex items-center gap-3 font-mono text-[13px]">
+              <span className="size-3 bg-cyan shadow-[0_0_8px_#22E4F5]" aria-hidden="true" />
+              <span>{save.agent.name}</span>
+              <span className="text-muted">· strategy v{save.policies?.active ?? 1}</span>
+            </div>
+          )}
+          <WalletButton />
+        </div>
       </div>
     </header>
   );
@@ -96,3 +100,21 @@ export const MODE_LABEL: Record<string, string> = {
   endless: "Endless Grid",
   training: "Training",
 };
+
+export const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
+
+export function WalletButton() {
+  const w = useWallet();
+  if (w.connected && w.address) {
+    return (
+      <button type="button" onClick={w.openModal} className="min-h-11 border border-line px-3 font-mono text-[13px] text-ink hover:border-cyan">
+        {short(w.address)}
+      </button>
+    );
+  }
+  return (
+    <button type="button" onClick={w.openModal} disabled={w.loading || w.connecting} className="min-h-11 bg-cyan px-4 text-sm font-semibold text-bg">
+      {w.loading ? "Loading wallet…" : w.connecting ? "Connecting…" : "Connect wallet"}
+    </button>
+  );
+}

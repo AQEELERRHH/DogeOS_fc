@@ -44,8 +44,11 @@ export class ArenaScene extends Phaser.Scene {
   private warnPhase = 0;
   private lastFrame: GameState | null = null;
 
-  constructor() {
+  private novaColor: number;
+
+  constructor(novaColor: number = C.nova) {
     super("arena");
+    this.novaColor = novaColor;
   }
 
   create() {
@@ -68,10 +71,10 @@ export class ArenaScene extends Phaser.Scene {
   }
 
   private makeNova() {
-    const body = this.add.rectangle(0, 0, CELL * 0.7, CELL * 0.7, C.nova).setStrokeStyle(2, 0xe9fdff);
+    const body = this.add.rectangle(0, 0, CELL * 0.7, CELL * 0.7, this.novaColor).setStrokeStyle(2, 0xe9fdff);
     const visor = this.add.rectangle(0, -CELL * 0.08, CELL * 0.42, CELL * 0.14, 0x05080f);
     const c = this.add.container(0, 0, [body, visor]);
-    body.postFX?.addGlow(C.nova, 4, 0, false, 0.1, 10);
+    body.postFX?.addGlow(this.novaColor, 4, 0, false, 0.1, 10);
     return c;
   }
 

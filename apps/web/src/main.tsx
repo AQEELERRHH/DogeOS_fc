@@ -6,9 +6,10 @@ import { Landing } from "./pages/Landing";
 import { Create } from "./pages/Create";
 import { Workshop } from "./pages/Workshop";
 import { History, Debrief } from "./pages/History";
-import { Shop } from "./pages/Shop";
 import { useSave } from "./store";
+import { WalletRoot } from "./wallet/WalletContext";
 
+const Shop = lazy(() => import("./pages/Shop").then((m) => ({ default: m.Shop })));
 const Arena = lazy(() => import("./pages/Arena").then((m) => ({ default: m.Arena })));
 
 function NeedsAgent({ children }: { children: React.ReactElement }) {
@@ -23,6 +24,7 @@ function Loading() {
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <BrowserRouter>
+      <WalletRoot>
       <Suspense fallback={<Loading />}>
         <Routes>
           <Route path="/" element={<Landing />} />
@@ -35,6 +37,7 @@ createRoot(document.getElementById("root")!).render(
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Suspense>
+      </WalletRoot>
     </BrowserRouter>
   </StrictMode>,
 );
