@@ -1,0 +1,35 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #070b14;
+  --color-bg2: #0a0f1b;
+  --color-surface: #0e1524;
+  --color-line: #22304a;
+  --color-line2: #1a2438;
+  --color-ink: #eceff4;
+  --color-soft: #b7c1d3;
+  --color-muted: #8b97ad;
+  --color-cyan: #22e4f5;
+  --color-violet: #9b6bff;
+  --color-amber: #ffb020;
+  --color-danger: #ff3b5c;
+  --color-ok: #3cf28b;
+  --font-pixel: "Press Start 2P", ui-monospace, monospace;
+  --font-sans: "Chakra Petch", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+}
+
+@layer base {
+  html, body, #root { min-height: 100%; }
+  body {
+    margin: 0;
+    background: var(--color-bg);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    background-image: repeating-linear-gradient(0deg, rgba(255,255,255,0.022) 0 1px, transparent 1px 3px);
+  }
+  a { color: var(--color-cyan); }
+  :focus-visible { outline: 2px solid var(--color-cyan); outline-offset: 2px; }
+  button { cursor: pointer; }
+  button:disabled { cursor: not-allowed; opacity: 0.5; }
+}

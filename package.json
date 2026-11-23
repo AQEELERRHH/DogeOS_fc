@@ -1,0 +1,11 @@
+{
+  "name": "aftermaze",
+  "private": true,
+  "workspaces": ["packages/*", "apps/*"],
+  "scripts": {
+    "dev": "npm run dev -w @aftermaze/web",
+    "build": "npm run build -w @aftermaze/web",
+    "test": "npm run test -w @aftermaze/engine",
+    "simulate": "npm run simulate -w @aftermaze/engine --"
+  }
+}

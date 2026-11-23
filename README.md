@@ -4,10 +4,23 @@ Single-player autonomous-agent maze survival game on DogeOS. You train one robot
 
 ```
 aftermaze/
+├── apps/web/           Playable web app: React + Phaser + Tailwind (Vite). Runs the engine in a Web Worker.
 ├── contracts/          Solidity (Hardhat): AgentRegistry, MazeEconomy, RewardReserve, MatchResults
 │                       Deployed + verified on DogeOS Chikyū (see contracts/deployments/)
 └── packages/engine/    Standalone TypeScript game engine + NOVA's brain (no Phaser, runs in Node or browser)
 ```
+
+## Run the web app
+
+```bash
+npm install          # from the repo root (npm workspaces)
+npm run dev          # http://localhost:5173
+npm run build        # production build → apps/web/dist
+```
+
+Deploys on Vercel from the repo root using `vercel.json` (no settings to change).
+Current version: everything is saved in the browser (localStorage). Wallet login, DOGE purchases,
+server-side match verification and reward claims are the next steps.
 
 ## Engine (`packages/engine`)
 
