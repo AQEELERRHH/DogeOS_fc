@@ -10,6 +10,7 @@ import { useSave } from "./store";
 import { WalletRoot } from "./wallet/WalletContext";
 
 const Shop = lazy(() => import("./pages/Shop").then((m) => ({ default: m.Shop })));
+const Football = lazy(() => import("./pages/Football").then((m) => ({ default: m.Football })));
 const Arena = lazy(() => import("./pages/Arena").then((m) => ({ default: m.Arena })));
 
 function NeedsAgent({ children }: { children: React.ReactElement }) {
@@ -33,6 +34,7 @@ createRoot(document.getElementById("root")!).render(
           <Route path="/workshop" element={<NeedsAgent><Workshop /></NeedsAgent>} />
           <Route path="/history" element={<NeedsAgent><History /></NeedsAgent>} />
           <Route path="/history/:id" element={<NeedsAgent><Debrief /></NeedsAgent>} />
+          <Route path="/football" element={<Football />} />
           <Route path="/shop" element={<Shop />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
