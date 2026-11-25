@@ -21,6 +21,7 @@ export class PitchScene extends Phaser.Scene {
   private source: () => FrameSource;
   private players: Phaser.GameObjects.Container[] = [];
   private ring!: Phaser.GameObjects.Arc;
+  private you!: Phaser.GameObjects.Container;
   private ball!: Phaser.GameObjects.Arc;
   private shadow!: Phaser.GameObjects.Ellipse;
   private banner!: Phaser.GameObjects.Text;
@@ -60,6 +61,13 @@ export class PitchScene extends Phaser.Scene {
 
     this.ring = this.add.circle(0, 0, 0.85 * PX).setStrokeStyle(2, 0xffb020, 0.9).setFillStyle(0, 0).setDepth(4);
     this.shadow = this.add.ellipse(0, 0, 10, 5, 0x000000, 0.35).setDepth(5);
+    // Player-manager marker: a bobbing arrow over the player you control.
+    const arrow = this.add.triangle(0, 0, -10, -8, 10, -8, 0, 5, 0x22e4f5).setStrokeStyle(2, 0x070b14);
+    const label = this.add
+      .text(0, -20, "YOU", { fontFamily: '"Press Start 2P", monospace', fontSize: "12px", color: "#22E4F5", stroke: "#070B14", strokeThickness: 3 })
+      .setOrigin(0.5);
+    this.you = this.add.container(0, 0, [arrow, label]).setDepth(20).setVisible(false);
+    this.tweens.add({ targets: arrow, y: -4, duration: 420, yoyo: true, repeat: -1, ease: "Sine.easeInOut" });
     this.ball = this.add.circle(0, 0, 0.27 * PX, 0xffffff).setStrokeStyle(1.5, 0x070b14).setDepth(12);
     this.banner = this.add
       .text(PITCH_W / 2, PITCH_H / 2, "", { fontFamily: '"Press Start 2P", monospace', fontSize: "44px", color: "#22E4F5", stroke: "#070B14", strokeThickness: 8 })
@@ -109,6 +117,11 @@ export class PitchScene extends Phaser.Scene {
       const o = this.players[cur.ball.owner];
       this.ring.setVisible(true).setPosition(o.x, o.y);
     } else this.ring.setVisible(false);
+    const ctl = cur.control?.[0];
+    if (ctl) {
+      const pl = this.players[ctl.idx];
+      this.you.setVisible(true).setPosition(pl.x, pl.y - 0.95 * PX);
+    } else this.you.setVisible(false);
 
     // New events → effects
     if (cur.events.length < this.seenEvents) this.seenEvents = 0;

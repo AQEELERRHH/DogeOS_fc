@@ -18,7 +18,9 @@ import {
   type FormationKey,
   type MatchState,
   type Tactics,
-  type TacticsInput,
+  type MatchInput,
+  type TouchlineCall,
+  type V2,
 } from "@dogefc/engine";
 import { PitchCanvas } from "../football/PitchCanvas";
 import { FormationDiagram } from "../football/FormationDiagram";
@@ -32,6 +34,19 @@ import { explainError, writeAndWait } from "../wallet/tx";
 import { TICKETS_ADDRESS, matchFromReceipt, readFee, rivalId, ticketsAbi } from "../chain/tickets";
 import { FAUCET, txUrl } from "../chain/config";
 import { useCommentaryVoice } from "../football/voice";
+import { TouchPad, TouchlineCalls, ZERO, useKeyboardControl } from "../football/controls";
+
+type WithoutTick<T> = T extends unknown ? Omit<T, "t"> : never;
+
+const CONTROL_KEY = "dogefc.control";
+function savedControl(): number | null {
+  try {
+    const v = localStorage.getItem(CONTROL_KEY);
+    return v === null || v === "off" ? null : Number(v);
+  } catch {
+    return null;
+  }
+}
 
 const DEMO_CLUB = CLUBS[0];
 const RIVALS = CLUBS.slice(1);
@@ -72,7 +87,20 @@ export function Play() {
   const [paused, setPaused] = useState(false);
   const [speed, setSpeed] = useState(0);
   const [, setUi] = useState(0);
-  const sim = useRef<{ state: MatchState; prev: MatchState | null; acc: number; last: number; inputs: TacticsInput[]; htShown: boolean; recorded?: boolean } | null>(null);
+  const sim = useRef<{ state: MatchState; prev: MatchState | null; acc: number; last: number; inputs: MatchInput[]; htShown: boolean; recorded?: boolean } | null>(null);
+  // Player-manager mode (optional): which of your outfield players you steer, if any.
+  const [controlPick, setControlPickState] = useState<number | null>(savedControl);
+  const setControlPick = (v: number | null) => {
+    setControlPickState(v);
+    try {
+      localStorage.setItem(CONTROL_KEY, v === null ? "off" : String(v));
+    } catch {
+      // ignore
+    }
+  };
+  const [controlling, setControlling] = useState(false);
+  const lastMove = useRef<V2>(ZERO);
+  const coarse = useMemo(() => typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)").matches, []);
   const clubRef = useRef(club);
   clubRef.current = club;
   const pausedRef = useRef(paused);
@@ -135,7 +163,13 @@ export function Play() {
       { seed, home: myClub, away: avoidClash(myClub, rival), halfTicks: 900, aiControls: [false, true] },
       [tactics, null],
     );
-    sim.current = { state, prev: null, acc: 0, last: performance.now(), inputs: [], htShown: false };
+    const pick = controlPick !== null && myClub.squad[controlPick]?.role !== "GK" ? controlPick : null;
+    // Inputs at the current tick are applied by the engine on its next step, and kept for replays.
+    const inputs: MatchInput[] = pick !== null ? [{ t: 0, team: 0, player: pick, move: ZERO }] : [];
+    sim.current = { state, prev: null, acc: 0, last: performance.now(), inputs, htShown: false };
+    lastMove.current = ZERO;
+    setControlling(pick !== null);
+    if (pick !== null) setSpeed(0); // easier to play at normal speed
     setDraft({ ...tactics });
     setEarned(null);
     setPaused(false);
@@ -197,6 +231,31 @@ export function Play() {
     setTactics({ ...draft });
   };
 
+  const controlIdx = controlPick !== null && myClub.squad[controlPick]?.role !== "GK" ? controlPick : null;
+  const pushInput = (inp: WithoutTick<MatchInput>) => {
+    const s = sim.current;
+    if (!s || s.state.phase === "fulltime") return;
+    s.inputs.push({ ...inp, t: s.state.tick } as MatchInput);
+  };
+  const onMove = (m: V2) => {
+    if (controlIdx === null) return;
+    lastMove.current = m;
+    pushInput({ team: 0, player: controlIdx, move: m });
+  };
+  const onAction = (a: "pass" | "shoot") => {
+    if (controlIdx === null) return;
+    pushInput({ team: 0, player: controlIdx, move: lastMove.current, action: a });
+  };
+  const toggleControl = () => {
+    if (controlIdx === null) return;
+    if (controlling) pushInput({ team: 0, player: -1, move: ZERO });
+    else pushInput({ team: 0, player: controlIdx, move: ZERO });
+    lastMove.current = ZERO;
+    setControlling(!controlling);
+  };
+  const shout = (c: TouchlineCall) => pushInput({ team: 0, call: c });
+  useKeyboardControl(screen.k === "live" && controlling && !paused, onMove, onAction);
+
   const voice = useCommentaryVoice(screen.k === "setup" ? "setup" : screen.key, paused || screen.k !== "live");
   useEffect(() => {
     const s = sim.current;
@@ -204,7 +263,7 @@ export function Play() {
   });
 
   if (screen.k === "setup") {
-    return <Setup club={myClub} hasClub={!!club} rival={rival} setRival={setRival} tactics={tactics} setTactics={setTactics} onKickOff={kickOff} fee={fee} status={status} />;
+    return <Setup club={myClub} hasClub={!!club} rival={rival} setRival={setRival} tactics={tactics} setTactics={setTactics} onKickOff={kickOff} fee={fee} status={status} controlPick={controlPick} setControlPick={setControlPick} />;
   }
 
   const s = sim.current!.state;
@@ -291,13 +350,39 @@ export function Play() {
                 </a>
               )}
             </div>
+            {controlIdx !== null && !done && (
+              <Panel className="flex flex-col gap-3 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-pixel text-[10px] text-cyan">
+                    PLAYER-MANAGER · #{myClub.squad[controlIdx].number} {myClub.squad[controlIdx].name}
+                  </span>
+                  <button type="button" className={btnGhost} onClick={toggleControl}>
+                    {controlling ? "Let the AI play him" : "Take control"}
+                  </button>
+                </div>
+                {controlling ? (
+                  coarse ? (
+                    <TouchPad onMove={onMove} onAction={onAction} />
+                  ) : (
+                    <p className="m-0 text-sm text-soft">
+                      Move with <Kbd>W</Kbd><Kbd>A</Kbd><Kbd>S</Kbd><Kbd>D</Kbd> or the arrow keys. <Kbd>Space</Kbd> passes where you're heading, <Kbd>Enter</Kbd> shoots. Let go of the keys and the AI positions him off the ball.
+                    </p>
+                  )
+                ) : (
+                  <p className="m-0 text-sm text-muted">The AI is playing him. Take control again whenever you like.</p>
+                )}
+              </Panel>
+            )}
             <Stats s={s} possTotal={possTotal} />
           </section>
 
           <aside className="flex min-w-0 flex-[1_1_330px] flex-col gap-4">
+            <Panel className="p-4 sm:p-5">
+              <TouchlineCalls s={s} disabled={done || s.phase === "halftime"} onCall={shout} />
+            </Panel>
             <Panel className="flex flex-col gap-3 p-4 sm:p-5">
               <div className="flex items-baseline justify-between gap-2">
-                <span className="font-pixel text-[10px] text-cyan">TOUCHLINE</span>
+                <span className="font-pixel text-[10px] text-cyan">TACTICS</span>
                 <span className="text-xs text-muted">{dirty ? "Not applied yet" : "Current plan"}</span>
               </div>
               <TacticsEditor value={draft} onChange={setDraft} compact />
@@ -320,6 +405,10 @@ export function Play() {
       </main>
     </div>
   );
+}
+
+function Kbd({ children }: { children: React.ReactNode }) {
+  return <kbd className="mx-0.5 inline-block min-w-6 border border-line bg-[#0A1122] px-1.5 py-0.5 text-center font-mono text-xs text-ink">{children}</kbd>;
 }
 
 function snapshot(s: MatchState): MatchState {
@@ -470,7 +559,7 @@ function KickOffNote({ status }: { status: KickOffStatus }) {
   );
 }
 
-function Setup({ club, hasClub, rival, setRival, tactics, setTactics, onKickOff, fee, status }: { club: ClubDef; hasClub: boolean; rival: ClubDef; setRival: (c: ClubDef) => void; tactics: Tactics; setTactics: (t: Tactics) => void; onKickOff: () => void; fee: bigint | null; status: KickOffStatus }) {
+function Setup({ club, hasClub, rival, setRival, tactics, setTactics, onKickOff, fee, status, controlPick, setControlPick }: { club: ClubDef; hasClub: boolean; rival: ClubDef; setRival: (c: ClubDef) => void; tactics: Tactics; setTactics: (t: Tactics) => void; onKickOff: () => void; fee: bigint | null; status: KickOffStatus; controlPick: number | null; setControlPick: (v: number | null) => void }) {
   const busy = status.k === "confirm" || status.k === "mining";
   const squad = club.squad;
   return (
@@ -509,6 +598,23 @@ function Setup({ club, hasClub, rival, setRival, tactics, setTactics, onKickOff,
             <Eyebrow>2 · SET YOUR TACTICS</Eyebrow>
             <Panel>
               <TacticsEditor value={tactics} onChange={setTactics} />
+            </Panel>
+            <Eyebrow>3 · PLAYER-MANAGER MODE (OPTIONAL)</Eyebrow>
+            <Panel className="flex flex-col gap-3">
+              <p className="m-0 text-sm text-soft">Control one of your players yourself while the AI plays the rest. Leave it off to manage from the touchline only.</p>
+              <div className="grid gap-2 [grid-template-columns:repeat(auto-fit,minmax(130px,1fr))]">
+                <button type="button" aria-pressed={controlPick === null} onClick={() => setControlPick(null)} className={`min-h-12 px-3 text-left text-sm ${controlPick === null ? "bg-[#0B1E2A] font-semibold text-cyan outline outline-2 outline-cyan" : "border border-line bg-[#0A1122] text-soft"}`}>
+                  Off
+                </button>
+                {club.squad.map((p, i) =>
+                  p.role === "GK" ? null : (
+                    <button key={p.id} type="button" aria-pressed={controlPick === i} onClick={() => setControlPick(i)} className={`flex min-h-12 flex-col justify-center px-3 text-left text-sm ${controlPick === i ? "bg-[#0B1E2A] outline outline-2 outline-cyan" : "border border-line bg-[#0A1122]"}`}>
+                      <span className={controlPick === i ? "font-semibold text-cyan" : "text-ink"}>#{p.number} {p.name}</span>
+                      <span className="text-xs text-muted">{p.role}</span>
+                    </button>
+                  ),
+                )}
+              </div>
             </Panel>
           </section>
           <section className="flex min-w-0 flex-[1_1_300px] flex-col gap-3">

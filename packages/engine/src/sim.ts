@@ -10,6 +10,8 @@ import type {
   PlayerState,
   Tactics,
   TacticsInput,
+  MatchInput,
+  TouchlineCall,
   TeamStats,
   V2,
 } from "./types";
@@ -53,6 +55,36 @@ export interface MatchState {
   carrierTarget: V2 | null;
   /** Half-time has been reached (so it fires exactly once, even during a stoppage). */
   halfDone: boolean;
+  /** Active touchline call per team, until a tick. */
+  calls: [{ call: TouchlineCall; until: number } | null, { call: TouchlineCall; until: number } | null];
+  /** Touchline calls left this half per team. */
+  callsLeft: [number, number];
+  /** Player-manager mode: which player each team's human steers, and how. */
+  control: [Control | null, Control | null];
+}
+
+interface Control {
+  idx: number;
+  move: V2;
+  /** Last non-zero direction, so a standing carrier keeps facing the same way. */
+  facing: V2;
+  action: "pass" | "shoot" | null;
+  actionAt: number;
+}
+
+/** How long a touchline call lasts: two match minutes. */
+export const CALL_TICKS = 90;
+/** Touchline calls each manager can make per half. */
+export const CALLS_PER_HALF = 3;
+
+function activeCall(s: MatchState, team: 0 | 1): TouchlineCall | null {
+  const c = s.calls[team];
+  return c && s.tick < c.until ? c.call : null;
+}
+
+function controlled(s: MatchState, p: PlayerState): Control | null {
+  const c = s.control[p.team];
+  return c && c.idx === p.idx ? c : null;
 }
 
 const emptyStats = (): TeamStats => ({
@@ -125,6 +157,9 @@ export function createMatch(config: MatchConfig, startTactics?: [Tactics | null,
     tackleReadyAt: new Array(10).fill(0),
     carrierTarget: null,
     halfDone: false,
+    calls: [null, null],
+    callsLeft: [CALLS_PER_HALF, CALLS_PER_HALF],
+    control: [null, null],
   };
   assignSlots(s, 0);
   assignSlots(s, 1);
@@ -203,7 +238,9 @@ function moveTowards(p: PlayerState, target: V2, sprint: boolean, s: MatchState,
   p.vel = vel;
   p.pos = clampPitch(add(p.pos, vel));
   const effort = step / Math.max(1e-6, maxSpeed(p));
-  const drain = sprint && effort > 0.7 ? 0.05 * (1.45 - p.def.attrs.stamina / 100) : -0.025;
+  // An all-out press is exhausting: players tire faster and don't recover while it lasts.
+  const pressing = activeCall(s, p.team) === "press";
+  const drain = sprint && effort > 0.7 ? 0.05 * (1.45 - p.def.attrs.stamina / 100) * (pressing ? 3 : 1) : pressing ? 0 : -0.025;
   p.stamina = clamp(p.stamina - drain, 0, 100);
 }
 
@@ -242,7 +279,8 @@ function evaluateOptions(s: MatchState, me: PlayerState, rng: Rng): Option {
 
   // Shoot
   const st = me.def.style;
-  const range = 4 + a.shooting * 0.12 + (st === "poacher" ? 0.5 : 0);
+  const call = activeCall(s, me.team);
+  const range = 4 + a.shooting * 0.12 + (st === "poacher" ? 0.5 : 0) + (call === "shoot" ? 4 : 0);
   if (dGoal < range && me.slot !== 0) {
     let blockers = 0;
     for (const o of opponents(s, me.team)) {
@@ -253,13 +291,15 @@ function evaluateOptions(s: MatchState, me: PlayerState, rng: Rng): Option {
     const angle = Math.abs(me.pos.y - goal.y) / Math.max(1, dGoal); // 0 = straight on
     const xg = clamp(1.1 - dGoal / 13, 0.03, 0.8) * (0.55 + a.shooting / 220) * (1 - Math.min(0.75, blockers * 0.28 + press * 0.12)) * (1 - angle * 0.45);
     const shootK = st === "poacher" ? 1.25 : st === "box2box" ? 1.1 : st === "playmaker" ? 0.9 : st === "target" ? 0.8 : st === "stopper" || st === "cover" ? 0.8 : 1;
-    if (xg > 0.1) opts.push({ kind: "shoot", value: xg * 115 * (0.85 + 0.075 * T.mentality) * shootK });
+    const callK = call === "shoot" ? 1.5 : call === "attack" ? 1.15 : call === "keep" ? 0.6 : 1;
+    const callBonus = call === "shoot" ? 30 : 0;
+    if (xg > (call === "shoot" ? 0.02 : 0.1)) opts.push({ kind: "shoot", value: xg * 115 * (0.85 + 0.075 * T.mentality) * shootK * callK + callBonus });
   }
 
   // Pass
   const P = T.passing;
-  const wProg = 1.1 + P * 0.9;
-  const wRisk = 9 - P * 2.4;
+  const wProg = (1.1 + P * 0.9) * (call === "keep" ? 0.5 : call === "attack" ? 1.3 : 1);
+  const wRisk = (9 - P * 2.4) * (call === "keep" ? 1.7 : 1);
   const passRange = 10 + a.passing * 0.14;
   for (const t of s.players) {
     if (t.team !== me.team || t === me) continue;
@@ -277,6 +317,7 @@ function evaluateOptions(s: MatchState, me: PlayerState, rng: Rng): Option {
     let v = 32 + progress * wProg - risk * wRisk - recvPress * 7 - distPen + threat * 38;
     if (t.slot === 0) v -= 22 + (relX(me.team, me.pos.x) > 0.4 ? 30 : 0);
     if (progress < -4 && P === 2) v -= 8;
+    if (call === "keep") v += 6 - risk * 6; // safe, short passes
     if (st === "playmaker") v += 8 + Math.max(0, progress) * 0.35;
     else if (st === "target") v += 7; // lay it off to a runner
     if (t.def.style === "target" && relX(me.team, t.pos.x) > 0.55) v += 4; // aim for the big man
@@ -294,14 +335,14 @@ function evaluateOptions(s: MatchState, me: PlayerState, rng: Rng): Option {
       if (d < 1.6 && along > 0.05) ahead += 1.6 - d;
     }
     const near = dGoal < 12 ? 10 : 0;
-    opts.push({ kind: "dribble", value: 22 + 3.5 * 1.7 + a.dribbling * 0.22 - ahead * 16 + near + (T.mentality - 2) * 3, point });
+    opts.push({ kind: "dribble", value: 22 + 3.5 * 1.7 + a.dribbling * 0.22 - ahead * 16 + near + (T.mentality - 2) * 3 + (call === "attack" ? 5 : call === "keep" ? -6 : 0), point });
   }
 
   // Hold / shield: drift away from the nearest opponent.
   let nearest: PlayerState | null = null;
   for (const o of opponents(s, me.team)) if (!nearest || dist(o.pos, me.pos) < dist(nearest.pos, me.pos)) nearest = o;
   const away = nearest ? norm(sub(me.pos, nearest.pos)) : { x: dir(me.team), y: 0 };
-  opts.push({ kind: "hold", value: 16 - press * (st === "target" ? 3 : 6) + (st === "target" ? 8 : 0), point: add(me.pos, mul(away, 2)) });
+  opts.push({ kind: "hold", value: 16 - press * (st === "target" ? 3 : 6) + (st === "target" ? 8 : 0) + (call === "keep" ? 10 - press * 4 : 0), point: add(me.pos, mul(away, 2)) });
 
   let best = opts[0];
   let bestV = -Infinity;
@@ -317,6 +358,27 @@ function evaluateOptions(s: MatchState, me: PlayerState, rng: Rng): Option {
 
 function rand(rng: Rng) {
   return (rng.next() % 100000) / 100000;
+}
+
+/** The team-mate best lined up with the direction the human is pointing, preferring open, nearer players. */
+function pickPassTarget(s: MatchState, me: PlayerState, facing: V2): PlayerState | null {
+  let best: PlayerState | null = null;
+  let bestV = -Infinity;
+  for (const t of s.players) {
+    if (t.team !== me.team || t === me) continue;
+    const v = sub(t.pos, me.pos);
+    const d = len(v);
+    if (d < 1.5 || d > 26) continue;
+    const align = (v.x * facing.x + v.y * facing.y) / d; // 1 = straight ahead
+    if (align < 0.2) continue;
+    let score = align * 10 - d * 0.18 - pressureOn(s, t, 2.6) * 3;
+    if (t.slot === 0) score -= 6;
+    if (score > bestV) {
+      bestV = score;
+      best = t;
+    }
+  }
+  return best;
 }
 
 function kickPass(s: MatchState, me: PlayerState, to: PlayerState, rng: Rng) {
@@ -430,8 +492,9 @@ function targetFor(s: MatchState, p: PlayerState, attacking: boolean): { point: 
   }
 
   const widthK = 0.75 + 0.22 * T.width;
+  const call = activeCall(s, p.team);
   if (attacking) {
-    let x = h.x + (T.mentality - 2) * 0.06 + (bx - 0.45) * 0.35;
+    let x = h.x + (T.mentality - 2) * 0.06 + (bx - 0.45) * 0.35 + (call === "attack" ? 0.1 : 0);
     const role = FORMATIONS[T.formation].slots[p.slot - 1].role;
     const st = p.def.style;
     if (st === "target") x -= 0.06;
@@ -454,6 +517,8 @@ function targetFor(s: MatchState, p: PlayerState, attacking: boolean): { point: 
   // Defending: compact block that slides with the ball.
   const dst = p.def.style;
   let x = h.x * 0.72 + (T.mentality - 2) * 0.05 + (bx - 0.5) * 0.28 - 0.02 + T.pressing * 0.03;
+  if (call === "attack") x += 0.07;
+  else if (call === "press") x += 0.02;
   if (dst === "poacher") x += 0.08; // stays high for the counter
   else if (dst === "stopper") x += 0.03;
   else if (dst === "cover") x -= 0.04;
@@ -478,11 +543,16 @@ function targetFor(s: MatchState, p: PlayerState, attacking: boolean): { point: 
 }
 
 // ---------------------------------------------------------------- main step
-export function step(s: MatchState, inputs: TacticsInput[] = []): MatchState {
+export function step(s: MatchState, inputs: MatchInput[] = []): MatchState {
   if (s.phase === "fulltime") return s;
   const rng = new Rng(s.rng);
 
-  for (const inp of inputs) if (inp.t === s.tick) applyTactics(s, inp.team, inp.tactics, "Manager's instruction", false);
+  for (const inp of inputs) {
+    if (inp.t !== s.tick) continue;
+    if ("tactics" in inp) applyTactics(s, inp.team, inp.tactics, "Manager's instruction", false);
+    else if ("call" in inp) applyCall(s, inp.team, inp.call);
+    else applyControl(s, inp);
+  }
 
   if (s.phase === "goal" || s.phase === "halftime") {
     if (s.tick >= s.phaseUntil) {
@@ -519,11 +589,14 @@ export function step(s: MatchState, inputs: TacticsInput[] = []): MatchState {
     } else if (owner.team !== team) {
       const T = s.tactics[team];
       const depth = relX(team, ball.pos.x);
-      const engage = T.pressing === 0 ? 0.42 : T.pressing === 1 ? 0.62 : 1.01;
+      const pressCall = activeCall(s, team) === "press";
+      const engage = pressCall ? 1.01 : T.pressing === 0 ? 0.42 : T.pressing === 1 ? 0.62 : 1.01;
       const outfield = pool.filter((p) => p.slot !== 0).sort((a, b) => dist(a.pos, owner.pos) - dist(b.pos, owner.pos) || a.idx - b.idx);
       if (depth < engage || dist(outfield[0]?.pos ?? owner.pos, owner.pos) < 3) {
         if (outfield[0]) chasers.add(outfield[0].idx);
-        if (T.pressing === 2 && outfield[1] && depth > 0.45) chasers.add(outfield[1].idx);
+        if (pressCall) {
+          if (outfield[1] && depth > 0.35) chasers.add(outfield[1].idx);
+        } else if (T.pressing === 2 && outfield[1] && depth > 0.45) chasers.add(outfield[1].idx);
         else if (outfield[1]?.def.style === "box2box" && depth > 0.5 && dist(outfield[1].pos, owner.pos) < 6) chasers.add(outfield[1].idx);
       }
     }
@@ -533,6 +606,12 @@ export function step(s: MatchState, inputs: TacticsInput[] = []): MatchState {
   for (const p of s.players) {
     if (p.cooldown > 0) p.cooldown--;
     if (owner && p === owner) continue;
+    const ctl = controlled(s, p);
+    if (ctl && s.phase === "play" && len(ctl.move) > 0) {
+      // The human is steering this player.
+      moveTowards(p, add(p.pos, mul(ctl.move, 3)), true, s);
+      continue;
+    }
     if (s.shot && p.idx === s.shot.keeper) {
       const k = s.shot.result === "goal" ? 0.55 : 1; // beaten keepers don't quite get there
       const line = toPitch(p.team, { x: 0.6, y: 0 });
@@ -561,7 +640,30 @@ export function step(s: MatchState, inputs: TacticsInput[] = []): MatchState {
   }
 
   // ---------- ball carrier
-  if (owner && s.phase === "play") {
+  const ownerCtl = owner ? controlled(s, owner) : null;
+  if (owner && ownerCtl && s.phase === "play") {
+    // Player-manager: the human decides. Pass or shoot as soon as the player can.
+    if (ownerCtl.action && s.tick - ownerCtl.actionAt > 20) ownerCtl.action = null; // stale button press
+    if (ownerCtl.action && owner.cooldown <= 0) {
+      const act = ownerCtl.action;
+      ownerCtl.action = null;
+      if (act === "shoot") kickShot(s, owner, rng);
+      else {
+        // Pass where he's pointing; if nobody is that way, to the nearest outfield team-mate.
+        const to =
+          pickPassTarget(s, owner, ownerCtl.facing) ??
+          s.players.filter((q) => q.team === owner.team && q !== owner && q.slot !== 0).sort((x, y) => dist(x.pos, owner.pos) - dist(y.pos, owner.pos) || x.idx - y.idx)[0];
+        if (to) kickPass(s, owner, to, rng);
+      }
+    }
+    if (s.ball.owner === owner.idx) {
+      const moving = len(ownerCtl.move) > 0;
+      const tgt = moving ? add(owner.pos, mul(ownerCtl.move, 2.5)) : owner.pos;
+      moveTowards(owner, tgt, moving, s, 0.82);
+      s.ball.pos = add(owner.pos, mul(ownerCtl.facing, 0.45));
+      s.ball.vel = { x: 0, y: 0 };
+    }
+  } else if (owner && s.phase === "play") {
     if (owner.cooldown <= 0) {
       const choice = evaluateOptions(s, owner, rng);
       if (choice.kind === "pass" && choice.target) kickPass(s, owner, choice.target, rng);
@@ -581,6 +683,9 @@ export function step(s: MatchState, inputs: TacticsInput[] = []): MatchState {
   } else if (owner && s.phase === "kickoff") {
     s.ball.pos = add(owner.pos, { x: dir(owner.team) * 0.45, y: 0 });
   }
+
+  // A pass or shot pressed without the ball is forgotten after a moment.
+  for (const c of s.control) if (c && c.action && s.tick - c.actionAt > 20) c.action = null;
 
   // ---------- tackles
   if (s.ball.owner >= 0 && s.phase === "play") {
@@ -747,6 +852,8 @@ function advanceClock(s: MatchState) {
     s.phase = "halftime";
     s.phaseUntil = s.tick + 30;
     s.events.push({ t: s.tick, type: "halftime", score: [...s.score] as [number, number] });
+    s.callsLeft = [CALLS_PER_HALF, CALLS_PER_HALF];
+    s.calls = [null, null];
     aiManagerUpdate(s, true);
   } else if (s.tick >= 2 * H) {
     s.phase = "fulltime";
@@ -796,6 +903,40 @@ function scoreGoal(s: MatchState, team: 0 | 1) {
   s.kickoffTeam = team === 0 ? 1 : 0;
 }
 
+/** Shouts a touchline call. Returns false if none are left this half or the match isn't live. */
+export function applyCall(s: MatchState, team: 0 | 1, call: TouchlineCall): boolean {
+  if (s.callsLeft[team] <= 0 || s.phase === "fulltime") return false;
+  s.callsLeft[team] -= 1;
+  s.calls[team] = { call, until: s.tick + CALL_TICKS };
+  s.events.push({ t: s.tick, type: "call", team, call });
+  return true;
+}
+
+/** Player-manager input. Only outfield players of that team can be controlled. */
+export function applyControl(s: MatchState, inp: { team: 0 | 1; player: number; move: V2; action?: "pass" | "shoot" }) {
+  if (inp.player < 0) {
+    s.control[inp.team] = null; // back to the AI
+    return;
+  }
+  const p = s.players[inp.player];
+  if (!p || p.team !== inp.team || p.def.role === "GK") return;
+  const prev = s.control[inp.team];
+  const move = len(inp.move) > 1e-9 ? norm(inp.move) : { x: 0, y: 0 };
+  const facing = len(move) > 0 ? move : prev && prev.idx === p.idx ? prev.facing : { x: dir(p.team), y: 0 };
+  s.control[inp.team] = {
+    idx: p.idx,
+    move,
+    facing,
+    action: inp.action ?? (prev && prev.idx === p.idx ? prev.action : null),
+    actionAt: inp.action ? s.tick : prev && prev.idx === p.idx ? prev.actionAt : 0,
+  };
+}
+
+/** Hands the controlled player back to the AI. */
+export function releaseControl(s: MatchState, team: 0 | 1) {
+  s.control[team] = null;
+}
+
 /** Changes a team's tactics mid-match (manager instruction or AI manager). */
 export function applyTactics(s: MatchState, team: 0 | 1, t: Tactics, reason: string, byAI: boolean) {
   const prev = s.tactics[team];
@@ -808,7 +949,7 @@ export function applyTactics(s: MatchState, team: 0 | 1, t: Tactics, reason: str
 export const cloneMatch = (s: MatchState): MatchState => structuredClone(s);
 
 /** Plays a whole match instantly (server checks, tests, balance runs). */
-export function simulate(config: MatchConfig, startTactics?: [Tactics | null, Tactics | null], inputs: TacticsInput[] = []): MatchState {
+export function simulate(config: MatchConfig, startTactics?: [Tactics | null, Tactics | null], inputs: MatchInput[] = []): MatchState {
   const s = createMatch(config, startTactics);
   let guard = 0;
   while (s.phase !== "fulltime" && guard++ < config.halfTicks * 4) step(s, inputs);

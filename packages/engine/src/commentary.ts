@@ -78,6 +78,16 @@ export function commentate(s: MatchState, events: MatchEvent[]): CommentaryLine[
           e.team,
         );
         break;
+      case "call": {
+        const lines: Record<typeof e.call, string[]> = {
+          shoot: [`The ${club(e.team)} manager is screaming "Shoot!" from the touchline.`, `"Have a go!" ${club(e.team)} are told to shoot on sight.`],
+          press: [`${club(e.team)} are sent hunting the ball. All-out press!`, `The ${club(e.team)} bench wants them on the front foot. Press, press, press!`],
+          keep: [`${club(e.team)} are told to keep it. Calm passes, no risks.`, `"Slow it down!" ${club(e.team)} will keep the ball for a while.`],
+          attack: [`Everyone forward for ${club(e.team)}! They're throwing bodies into the box.`, `${club(e.team)} go for broke. All forward!`],
+        };
+        L(pick(rng, lines[e.call]), "tactic", e.team);
+        break;
+      }
       case "halftime":
         L(`Half-time: ${s.config.home.name} ${e.score[0]}–${e.score[1]} ${s.config.away.name}.`, "whistle", null);
         break;

@@ -113,6 +113,7 @@ export type MatchEvent =
   | { t: number; type: "interception"; by: number; from: number }
   | { t: number; type: "dribble"; by: number; past: number }
   | { t: number; type: "tactics"; team: 0 | 1; tactics: Tactics; reason: string; byAI: boolean }
+  | { t: number; type: "call"; team: 0 | 1; call: TouchlineCall }
   | { t: number; type: "halftime"; score: [number, number] }
   | { t: number; type: "fulltime"; score: [number, number] };
 
@@ -132,3 +133,28 @@ export interface TacticsInput {
   team: 0 | 1;
   tactics: Tactics;
 }
+
+/** A short burst instruction shouted from the touchline. */
+export type TouchlineCall = "shoot" | "press" | "keep" | "attack";
+
+export interface CallInput {
+  t: number;
+  team: 0 | 1;
+  call: TouchlineCall;
+}
+
+/**
+ * Player-manager mode: the human steers one outfield player.
+ * `move` is a direction (zero = let the AI position him when he hasn't got the ball).
+ * `action` is a one-off pass or shot, taken as soon as he can.
+ */
+export interface ControlInput {
+  t: number;
+  team: 0 | 1;
+  player: number;
+  move: V2;
+  action?: "pass" | "shoot";
+}
+
+/** Everything a human can do during a match. Recorded so a match can be replayed exactly. */
+export type MatchInput = TacticsInput | CallInput | ControlInput;

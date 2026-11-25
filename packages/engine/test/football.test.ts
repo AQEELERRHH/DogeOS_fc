@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CLUBS, LENGTH, WIDTH, commentate, createMatch, simulate, step, type MatchConfig, type TacticsInput } from "../src/index";
-import { drillCost, runDrill, pointsForResult } from "../src/index";
+import { drillCost, runDrill, pointsForResult, applyCall, applyControl, CALLS_PER_HALF, type MatchInput } from "../src/index";
 
 const cfg = (seed: string, ai: [boolean, boolean] = [true, true]): MatchConfig => ({ seed, home: CLUBS[0], away: CLUBS[3], halfTicks: 900, aiControls: ai });
 
@@ -114,5 +114,72 @@ describe("training and roles", () => {
     const t = count("target");
     expect(p.shots).toBeGreaterThan(t.shots);
     expect(t.passes).toBeGreaterThan(p.passes);
+  });
+});
+
+describe("touchline calls and player-manager mode", () => {
+  it("limits calls per half and resets them at half-time", () => {
+    const s = createMatch(cfg("calls", [false, true]));
+    expect(applyCall(s, 0, "shoot")).toBe(true);
+    expect(applyCall(s, 0, "press")).toBe(true);
+    expect(applyCall(s, 0, "keep")).toBe(true);
+    expect(applyCall(s, 0, "attack")).toBe(false);
+    expect(s.callsLeft[0]).toBe(0);
+    while (s.tick < 905) step(s);
+    expect(s.callsLeft[0]).toBe(CALLS_PER_HALF);
+  });
+
+  it("replays exactly with calls and control inputs", () => {
+    const inputs: MatchInput[] = [
+      { t: 50, team: 0, call: "shoot" },
+      { t: 120, team: 0, player: 4, move: { x: 1, y: 0 } },
+      { t: 160, team: 0, player: 4, move: { x: 1, y: 0 }, action: "shoot" },
+      { t: 200, team: 0, player: 4, move: { x: 0, y: 0 } },
+      { t: 400, team: 0, call: "press" },
+      { t: 600, team: 0, player: -1, move: { x: 0, y: 0 } },
+    ];
+    const a = simulate(cfg("replay-in", [false, true]), undefined, inputs);
+    const b = simulate(cfg("replay-in", [false, true]), undefined, inputs);
+    expect(a.score).toEqual(b.score);
+    expect(a.events.length).toBe(b.events.length);
+    expect(JSON.stringify(a.stats)).toBe(JSON.stringify(b.stats));
+  });
+
+  it("'shoot on sight' produces more shots", () => {
+    let plain = 0;
+    let shooting = 0;
+    for (let i = 0; i < 25; i++) {
+      const calls: MatchInput[] = [0, 300, 600, 950, 1250, 1550].map((t) => ({ t, team: 0 as const, call: "shoot" as const }));
+      plain += simulate(cfg(`sos-${i}`, [false, true])).stats[0].shots;
+      shooting += simulate(cfg(`sos-${i}`, [false, true]), undefined, calls).stats[0].shots;
+    }
+    expect(shooting).toBeGreaterThan(plain * 1.04);
+  });
+
+  it("a controlled player goes where he's told and shoots when asked", () => {
+    const s = createMatch(cfg("ctl", [false, true]));
+    while (s.phase !== "play") step(s);
+    const me = s.players[4];
+    // Give him the ball near the box and point him at goal.
+    s.ball.owner = me.idx;
+    me.pos = { x: LENGTH - 9, y: WIDTH / 2 };
+    me.cooldown = 0;
+    applyControl(s, { team: 0, player: me.idx, move: { x: 1, y: 0 } });
+    const x0 = me.pos.x;
+    for (let i = 0; i < 4; i++) step(s);
+    expect(me.pos.x).toBeGreaterThan(x0);
+    applyControl(s, { team: 0, player: me.idx, move: { x: 1, y: 0 }, action: "shoot" });
+    let shot = false;
+    for (let i = 0; i < 6 && !shot; i++) {
+      step(s);
+      shot = s.events.some((e) => e.type === "shot" && e.by === me.idx);
+    }
+    expect(shot).toBe(true);
+  });
+
+  it("goalkeepers can't be controlled", () => {
+    const s = createMatch(cfg("gk", [false, true]));
+    applyControl(s, { team: 0, player: 0, move: { x: 1, y: 0 } });
+    expect(s.control[0]).toBeNull();
   });
 });
