@@ -204,7 +204,7 @@ export function Play() {
   return (
     <div className="min-h-screen">
       <SiteHeader>
-        <span className="font-mono text-xs text-amber">Friendly vs {rival.name}</span>
+        <span className="font-mono text-xs text-amber">{onChain ? `Match #${onChain.matchId.toString()}` : "Match"} vs {rival.name}</span>
       </SiteHeader>
       <main className="mx-auto flex max-w-[1400px] flex-col gap-5 px-5 pb-10 pt-5 sm:px-8">
         <Scoreboard s={s} />
@@ -407,10 +407,28 @@ function TacticsEditor({ value, onChange, compact = false }: { value: Tactics; o
   );
 }
 
+function rgb(hex: string) {
+  const n = parseInt(hex.replace("#", ""), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+/** Rough perceptual distance between two colours (weighted RGB). */
+function colourGap(a: string, b: string) {
+  const [r1, g1, b1] = rgb(a);
+  const [r2, g2, b2] = rgb(b);
+  const rm = (r1 + r2) / 2;
+  return Math.sqrt((2 + rm / 256) * (r1 - r2) ** 2 + 4 * (g1 - g2) ** 2 + (2 + (255 - rm) / 256) * (b1 - b2) ** 2);
+}
+
+/** Kits that look alike are unreadable on the pitch. The away side changes into a clearly different kit. */
 function avoidClash(home: ClubDef, away: ClubDef): ClubDef {
-  // Two kits the same colour are unreadable. The away side changes into its trim colour.
-  if (home.color.toLowerCase() !== away.color.toLowerCase()) return away;
-  return { ...away, color: away.trim, trim: away.color };
+  const MIN_GAP = 220;
+  if (colourGap(home.color, away.color) >= MIN_GAP) return away;
+  // Bright change kits only, so they also stand out on the dark green pitch.
+  const options = ["#F4F7FB", "#2E6BFF", "#B07CFF", "#22E4F5", "#7CFF6B", "#FFC23D"];
+  const alt = options.find((c) => colourGap(c, home.color) >= MIN_GAP && colourGap(c, "#0C3127") >= 250) ?? "#F4F7FB";
+  const trim = colourGap(alt, "#070B14") > 300 ? "#070B14" : "#F4F7FB";
+  return { ...away, color: alt, trim };
 }
 
 function feeLabel(fee: bigint | null) {
@@ -448,7 +466,7 @@ function Setup({ club, hasClub, rival, setRival, tactics, setTactics, onKickOff,
       <SiteHeader />
       <main className="mx-auto flex max-w-[1240px] flex-col gap-6 px-5 pb-14 pt-7 sm:px-8">
         <div className="flex flex-col gap-1.5">
-          <Eyebrow className="text-amber">FRIENDLY MATCH</Eyebrow>
+          <Eyebrow className="text-amber">MATCH DAY · 1 DOGE ENTRY</Eyebrow>
           <h1 className="m-0 text-3xl font-bold">You're the manager of {club.name}</h1>
           <p className="m-0 max-w-3xl text-soft">Pick a rival, set your formation and tactics, then watch your AI players carry out the plan. Change things from the touchline at any time, and at half-time.</p>
         </div>
