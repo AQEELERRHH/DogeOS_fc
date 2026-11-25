@@ -5,3 +5,4 @@ export * from "./sim";
 export * from "./manager";
 export * from "./commentary";
 export * from "./rng";
+export * from "./training";

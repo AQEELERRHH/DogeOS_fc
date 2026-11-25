@@ -13,6 +13,7 @@ import {
   createMatch,
   matchMinute,
   step,
+  styleLabel,
   type ClubDef,
   type FormationKey,
   type MatchState,
@@ -22,9 +23,11 @@ import {
 import { PitchCanvas } from "../football/PitchCanvas";
 import { FormationDiagram } from "../football/FormationDiagram";
 import type { FrameSource } from "../football/PitchScene";
+import { Link } from "react-router-dom";
 import { Eyebrow, Panel, SiteHeader, btnGhost, btnPrimary } from "../components/ui";
+import { toClubDef, useClub } from "../club/store";
 
-const MY_CLUB = CLUBS[0];
+const DEMO_CLUB = CLUBS[0];
 const RIVALS = CLUBS.slice(1);
 const TICK_MS = 100;
 const SPEEDS = [1, 2, 4];
@@ -32,6 +35,9 @@ const SPEEDS = [1, 2, 4];
 type Screen = { k: "setup" } | { k: "live"; key: string } | { k: "done"; key: string };
 
 export function Play() {
+  const { club, recordResult } = useClub();
+  const myClub = useMemo(() => (club ? toClubDef(club) : DEMO_CLUB), [club]);
+  const [earned, setEarned] = useState<number | null>(null);
   const [screen, setScreen] = useState<Screen>({ k: "setup" });
   const [rival, setRival] = useState<ClubDef>(RIVALS[0]);
   const [tactics, setTactics] = useState<Tactics>({ ...DEFAULT_TACTICS });
@@ -39,7 +45,9 @@ export function Play() {
   const [paused, setPaused] = useState(false);
   const [speed, setSpeed] = useState(0);
   const [, setUi] = useState(0);
-  const sim = useRef<{ state: MatchState; prev: MatchState | null; acc: number; last: number; inputs: TacticsInput[]; htShown: boolean } | null>(null);
+  const sim = useRef<{ state: MatchState; prev: MatchState | null; acc: number; last: number; inputs: TacticsInput[]; htShown: boolean; recorded?: boolean } | null>(null);
+  const clubRef = useRef(club);
+  clubRef.current = club;
   const pausedRef = useRef(paused);
   const speedRef = useRef(speed);
   pausedRef.current = paused;
@@ -47,11 +55,12 @@ export function Play() {
 
   const kickOff = () => {
     const state = createMatch(
-      { seed: `friendly:${Date.now()}`, home: MY_CLUB, away: rival, halfTicks: 900, aiControls: [false, true] },
+      { seed: `friendly:${Date.now()}`, home: myClub, away: avoidClash(myClub, rival), halfTicks: 900, aiControls: [false, true] },
       [tactics, null],
     );
     sim.current = { state, prev: null, acc: 0, last: performance.now(), inputs: [], htShown: false };
     setDraft({ ...tactics });
+    setEarned(null);
     setPaused(false);
     setScreen({ k: "live", key: state.config.seed });
   };
@@ -79,7 +88,11 @@ export function Play() {
               break;
             }
           }
-          if ((s.state.phase as string) === "fulltime") setScreen((x) => (x.k === "live" ? { k: "done", key: x.key } : x));
+          if ((s.state.phase as string) === "fulltime" && !s.recorded) {
+            s.recorded = true;
+            if (clubRef.current) setEarned(recordResult(s.state.config.away.name, s.state.score[0], s.state.score[1]));
+            setScreen((x) => (x.k === "live" ? { k: "done", key: x.key } : x));
+          }
         }
       }
       raf = requestAnimationFrame(loop);
@@ -90,6 +103,7 @@ export function Play() {
       cancelAnimationFrame(raf);
       clearInterval(ui);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screen.k]);
 
   const source = useCallback((): FrameSource => {
@@ -107,7 +121,7 @@ export function Play() {
   };
 
   if (screen.k === "setup") {
-    return <Setup rival={rival} setRival={setRival} tactics={tactics} setTactics={setTactics} onKickOff={kickOff} />;
+    return <Setup club={myClub} hasClub={!!club} rival={rival} setRival={setRival} tactics={tactics} setTactics={setTactics} onKickOff={kickOff} />;
   }
 
   const s = sim.current!.state;
@@ -144,10 +158,19 @@ export function Play() {
                             : "Honours even."
                         : "Change your formation or tactics on the right, then start the second half."}
                     </p>
+                    {done && earned !== null && (
+                      <p className="m-0 font-pixel text-[11px] text-amber">+{earned} TRAINING POINT{earned === 1 ? "" : "S"}</p>
+                    )}
+                    {done && !club && (
+                      <p className="m-0 text-sm text-soft">
+                        <Link to="/club">Create your own club</Link> to earn training points and keep your record.
+                      </p>
+                    )}
                     {done ? (
                       <div className="flex flex-wrap justify-center gap-3">
                         <button type="button" className={btnPrimary} onClick={kickOff}>REMATCH</button>
                         <button type="button" className={btnGhost} onClick={() => setScreen({ k: "setup" })}>New match</button>
+                        {club && <Link to="/club" className={btnGhost}>Train players</Link>}
                       </div>
                     ) : (
                       <button type="button" className={btnPrimary} onClick={() => setPaused(false)}>START SECOND HALF</button>
@@ -299,17 +322,29 @@ function TacticsEditor({ value, onChange, compact = false }: { value: Tactics; o
   );
 }
 
-function Setup({ rival, setRival, tactics, setTactics, onKickOff }: { rival: ClubDef; setRival: (c: ClubDef) => void; tactics: Tactics; setTactics: (t: Tactics) => void; onKickOff: () => void }) {
-  const squad = useMemo(() => MY_CLUB.squad, []);
+function avoidClash(home: ClubDef, away: ClubDef): ClubDef {
+  // Two kits the same colour are unreadable. The away side changes into its trim colour.
+  if (home.color.toLowerCase() !== away.color.toLowerCase()) return away;
+  return { ...away, color: away.trim, trim: away.color };
+}
+
+function Setup({ club, hasClub, rival, setRival, tactics, setTactics, onKickOff }: { club: ClubDef; hasClub: boolean; rival: ClubDef; setRival: (c: ClubDef) => void; tactics: Tactics; setTactics: (t: Tactics) => void; onKickOff: () => void }) {
+  const squad = club.squad;
   return (
     <div className="min-h-screen">
       <SiteHeader />
       <main className="mx-auto flex max-w-[1240px] flex-col gap-6 px-5 pb-14 pt-7 sm:px-8">
         <div className="flex flex-col gap-1.5">
           <Eyebrow className="text-amber">FRIENDLY MATCH</Eyebrow>
-          <h1 className="m-0 text-3xl font-bold">You're the manager of {MY_CLUB.name}</h1>
+          <h1 className="m-0 text-3xl font-bold">You're the manager of {club.name}</h1>
           <p className="m-0 max-w-3xl text-soft">Pick a rival, set your formation and tactics, then watch your AI players carry out the plan. Change things from the touchline at any time, and at half-time.</p>
         </div>
+        {!hasClub && (
+          <div className="flex flex-wrap items-center justify-between gap-3 border border-amber/50 bg-[#1A1408] px-4 py-3">
+            <span className="text-sm text-soft">You're playing with the demo squad. Create your own club to name your players, train them and keep your record.</span>
+            <Link to="/club" className={btnGhost}>Create your club</Link>
+          </div>
+        )}
 
         <section className="flex flex-col gap-3">
           <Eyebrow>1 · CHOOSE YOUR OPPONENT</Eyebrow>
@@ -340,7 +375,7 @@ function Setup({ rival, setRival, tactics, setTactics, onKickOff }: { rival: Clu
                 <div key={p.id} className="flex flex-col gap-1 border-b border-line2 pb-2.5">
                   <span className="flex items-center justify-between gap-2">
                     <span className="font-semibold">#{p.number} {p.name}</span>
-                    <span className="font-pixel text-[9px] text-cyan">{p.role}</span>
+                    <span className="font-pixel text-[9px] text-cyan">{p.role}{p.style ? ` · ${styleLabel(p.style).toUpperCase()}` : ""}</span>
                   </span>
                   <span className="font-mono text-[11px] text-muted">
                     {p.role === "GK" ? `REF ${p.attrs.reflexes} · POS ${p.attrs.positioning}` : `PAC ${p.attrs.pace} · PAS ${p.attrs.passing} · SHO ${p.attrs.shooting} · DRI ${p.attrs.dribbling} · TAC ${p.attrs.tackling}`}

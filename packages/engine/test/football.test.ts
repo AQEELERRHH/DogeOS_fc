@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CLUBS, LENGTH, WIDTH, commentate, createMatch, simulate, step, type MatchConfig, type TacticsInput } from "../src/index";
+import { drillCost, runDrill, pointsForResult } from "../src/index";
 
 const cfg = (seed: string, ai: [boolean, boolean] = [true, true]): MatchConfig => ({ seed, home: CLUBS[0], away: CLUBS[3], halfTicks: 900, aiControls: ai });
 
@@ -43,11 +44,75 @@ describe("match engine", () => {
     expect(a.tactics[0].formation).toBe("1-1-2");
   });
 
+  it("still reaches half-time and full-time when a goal is celebrated across the whistle", () => {
+    const s = createMatch(cfg("stoppage"));
+    const H = s.config.halfTicks;
+    s.tick = H - 5;
+    s.phase = "goal";
+    s.phaseUntil = s.tick + 25;
+    while (s.tick < H + 2) step(s);
+    expect(s.events.filter((e) => e.type === "halftime")).toHaveLength(1);
+    expect(s.phase).toBe("halftime");
+    s.tick = 2 * H - 5;
+    s.phase = "goal";
+    s.phaseUntil = s.tick + 25;
+    let guard = 0;
+    while ((s.phase as string) !== "fulltime" && guard++ < 50) step(s);
+    expect(s.phase).toBe("fulltime");
+    expect(s.events.filter((e) => e.type === "fulltime")).toHaveLength(1);
+  });
+
   it("produces commentary for goals and the final whistle", () => {
     const s = createMatch(cfg("comm"));
     while (s.phase !== "fulltime") step(s);
     const lines = commentate(s, s.events);
     expect(lines.filter((l) => l.tone === "goal").length).toBe(s.score[0] + s.score[1]);
     expect(lines[lines.length - 1].text).toMatch(/Full-time/);
+  });
+});
+
+
+describe("training and roles", () => {
+  it("drills cost more as players improve and stop at the cap", () => {
+    expect(drillCost(50)).toBe(1);
+    expect(drillCost(70)).toBe(2);
+    expect(drillCost(80)).toBe(3);
+    expect(drillCost(88)).toBe(4);
+    expect(drillCost(90)).toBeNull();
+    const kanu = CLUBS[0].squad[4];
+    const r = runDrill(kanu, "finishing", 10)!;
+    expect(r.player.attrs.shooting).toBe(kanu.attrs.shooting + 1);
+    expect(r.cost).toBe(2);
+    expect(runDrill(kanu, "shot-stopping", 10)).toBeNull();
+    expect(runDrill(kanu, "finishing", 1)).toBeNull();
+  });
+
+  it("awards points for results", () => {
+    expect(pointsForResult(2, 0)).toBe(4);
+    expect(pointsForResult(2, 1)).toBe(3);
+    expect(pointsForResult(1, 1)).toBe(2);
+    expect(pointsForResult(0, 3)).toBe(1);
+  });
+
+  it("a player's style changes how he plays", () => {
+    const base = CLUBS[0];
+    const opp = CLUBS[3];
+    const count = (style: "poacher" | "target") => {
+      const club = { ...base, squad: base.squad.map((p, i) => (i === 4 ? { ...p, style } : p)) };
+      let shots = 0;
+      let passes = 0;
+      for (let seed = 1; seed <= 30; seed++) {
+        const s = simulate({ seed: `role:${seed}`, home: club, away: opp, halfTicks: 900, aiControls: [false, true] });
+        for (const e of s.events) {
+          if (e.type === "shot" && e.by === 4) shots++;
+          if (e.type === "pass" && e.from === 4) passes++;
+        }
+      }
+      return { shots, passes };
+    };
+    const p = count("poacher");
+    const t = count("target");
+    expect(p.shots).toBeGreaterThan(t.shots);
+    expect(t.passes).toBeGreaterThan(p.passes);
   });
 });

@@ -25,6 +25,7 @@ export function SiteHeader({ children }: { children?: ReactNode }) {
         <div className="flex flex-wrap items-center gap-6">
           <Logo />
           <nav aria-label="Main" className="flex flex-wrap gap-5 text-[15px]">
+            <NavLink to="/club" className={navCls}>Club</NavLink>
             <NavLink to="/play" className={navCls}>Play</NavLink>
             <NavLink to="/" end className={navCls}>About</NavLink>
           </nav>
