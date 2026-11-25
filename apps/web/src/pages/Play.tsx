@@ -217,9 +217,7 @@ export function Play() {
 
   return (
     <div className="min-h-screen">
-      <SiteHeader>
-        <span className="font-mono text-xs text-amber">{onChain ? `Match #${onChain.matchId.toString()}` : "Match"} vs {rival.name}</span>
-      </SiteHeader>
+      <SiteHeader />
       <main className="mx-auto flex max-w-[1400px] flex-col gap-5 px-5 pb-10 pt-5 sm:px-8">
         <Scoreboard s={s} />
 
