@@ -50,24 +50,26 @@ export interface WriteArgs {
  * and waits for confirmation. Never trusts the UI for price: callers pass the
  * price read from the contract.
  */
-export async function writeAndWait(provider: unknown, account: `0x${string}`, w: WriteArgs) {
+export async function writeAndWait(provider: unknown, account: `0x${string}`, w: WriteArgs, onSent?: (hash: `0x${string}`) => void) {
   const p = provider as Provider;
   await ensureChikyu(p);
   const { request } = await publicClient.simulateContract({ ...w, account } as Parameters<typeof publicClient.simulateContract>[0]);
   const wallet = createWalletClient({ account, chain: chikyu, transport: custom(p) });
   const hash = await wallet.writeContract(request as Parameters<typeof wallet.writeContract>[0]);
+  onSent?.(hash);
   const receipt = await publicClient.waitForTransactionReceipt({ hash });
   if (receipt.status !== "success") throw new Error("The transaction was reverted on-chain.");
-  return hash;
+  return { hash, receipt };
 }
 
 const FRIENDLY: Record<string, string> = {
   NoAgent: "Register your agent on-chain first.",
   AlreadyOwned: "You already own this item.",
   WrongPayment: "The price changed. Refresh and try again.",
+  TransferFailed: "The reward reserve didn't accept the fee. Try again in a moment.",
   ItemInactive: "This item isn't on sale right now.",
   UnknownItem: "This item doesn't exist on-chain.",
-  EnforcedPause: "The shop is paused right now.",
+  EnforcedPause: "Matches are paused right now. Try again later.",
   AlreadyRegistered: "This wallet already has an agent registered.",
   InvalidName: "Agent names must be 1–24 characters.",
 };
@@ -79,7 +81,7 @@ export function explainError(e: unknown): string {
     const revert = e.walk((x) => x instanceof ContractFunctionRevertedError) as ContractFunctionRevertedError | null;
     const name = revert?.data?.errorName;
     if (name) return FRIENDLY[name] ?? `The contract refused: ${name}.`;
-    if (/insufficient funds/i.test(e.message)) return "Not enough testnet DOGE for this purchase plus gas. Top up from the faucet.";
+    if (/insufficient funds/i.test(e.message)) return "Not enough testnet DOGE for the match fee plus gas. Top up from the faucet.";
     return e.shortMessage || e.message;
   }
   const code = (e as { code?: number })?.code;

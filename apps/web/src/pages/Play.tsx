@@ -26,6 +26,12 @@ import type { FrameSource } from "../football/PitchScene";
 import { Link } from "react-router-dom";
 import { Eyebrow, Panel, SiteHeader, btnGhost, btnPrimary } from "../components/ui";
 import { toClubDef, useClub } from "../club/store";
+import { formatEther } from "viem";
+import { useWallet } from "../wallet/WalletContext";
+import { explainError, writeAndWait } from "../wallet/tx";
+import { TICKETS_ADDRESS, matchFromReceipt, readFee, rivalId, ticketsAbi } from "../chain/tickets";
+import { FAUCET, txUrl } from "../chain/config";
+import { useCommentaryVoice } from "../football/voice";
 
 const DEMO_CLUB = CLUBS[0];
 const RIVALS = CLUBS.slice(1);
@@ -34,10 +40,31 @@ const SPEEDS = [1, 2, 4];
 
 type Screen = { k: "setup" } | { k: "live"; key: string } | { k: "done"; key: string };
 
+export type KickOffStatus = { k: "idle" } | { k: "connect" } | { k: "confirm" } | { k: "mining"; hash: string } | { k: "error"; msg: string };
+interface OnChainMatch {
+  matchId: bigint;
+  hash: string;
+}
+
 export function Play() {
   const { club, recordResult } = useClub();
   const myClub = useMemo(() => (club ? toClubDef(club) : DEMO_CLUB), [club]);
   const [earned, setEarned] = useState<number | null>(null);
+  const wallet = useWallet();
+  const [fee, setFee] = useState<bigint | null>(null);
+  const [status, setStatus] = useState<KickOffStatus>({ k: "idle" });
+  const [onChain, setOnChain] = useState<OnChainMatch | null>(null);
+
+  useEffect(() => {
+    readFee()
+      .then(setFee)
+      .catch(() => setFee(null));
+  }, []);
+
+  // Once the wallet connects after we asked, clear the prompt.
+  useEffect(() => {
+    if (wallet.connected && status.k === "connect") setStatus({ k: "idle" });
+  }, [wallet.connected, status.k]);
   const [screen, setScreen] = useState<Screen>({ k: "setup" });
   const [rival, setRival] = useState<ClubDef>(RIVALS[0]);
   const [tactics, setTactics] = useState<Tactics>({ ...DEFAULT_TACTICS });
@@ -53,9 +80,45 @@ export function Play() {
   pausedRef.current = paused;
   speedRef.current = speed;
 
-  const kickOff = () => {
+  const busy = status.k === "confirm" || status.k === "mining";
+
+  // Every match is paid for on-chain. The kick-off transaction fixes the seed the match is played from.
+  const kickOff = async () => {
+    if (busy) return;
+    // Local development only (stripped from production builds): play without paying.
+    if (import.meta.env.DEV && new URLSearchParams(location.search).has("devmatch")) {
+      startMatch(`dev:${Date.now()}`);
+      return;
+    }
+    if (!TICKETS_ADDRESS || fee === null) {
+      setStatus({ k: "error", msg: "The match contract isn't available right now. Try again in a moment." });
+      return;
+    }
+    if (!wallet.connected || !wallet.address || !wallet.provider) {
+      setStatus({ k: "connect" });
+      wallet.openModal();
+      return;
+    }
+    try {
+      setStatus({ k: "confirm" });
+      const { hash, receipt } = await writeAndWait(
+        wallet.provider,
+        wallet.address,
+        { address: TICKETS_ADDRESS, abi: ticketsAbi, functionName: "kickOff", args: [rivalId(rival.id)], value: fee },
+        (h) => setStatus({ k: "mining", hash: h }),
+      );
+      const m = matchFromReceipt(receipt);
+      setOnChain({ matchId: m.matchId, hash });
+      setStatus({ k: "idle" });
+      startMatch(`match:${m.matchId}:${m.seed}`);
+    } catch (e) {
+      setStatus({ k: "error", msg: explainError(e) });
+    }
+  };
+
+  const startMatch = (seed: string) => {
     const state = createMatch(
-      { seed: `friendly:${Date.now()}`, home: myClub, away: avoidClash(myClub, rival), halfTicks: 900, aiControls: [false, true] },
+      { seed, home: myClub, away: avoidClash(myClub, rival), halfTicks: 900, aiControls: [false, true] },
       [tactics, null],
     );
     sim.current = { state, prev: null, acc: 0, last: performance.now(), inputs: [], htShown: false };
@@ -120,8 +183,14 @@ export function Play() {
     setTactics({ ...draft });
   };
 
+  const voice = useCommentaryVoice(screen.k === "setup" ? "setup" : screen.key, paused || screen.k !== "live");
+  useEffect(() => {
+    const s = sim.current;
+    if (s && screen.k === "live") voice.feed(commentate(s.state, s.state.events));
+  });
+
   if (screen.k === "setup") {
-    return <Setup club={myClub} hasClub={!!club} rival={rival} setRival={setRival} tactics={tactics} setTactics={setTactics} onKickOff={kickOff} />;
+    return <Setup club={myClub} hasClub={!!club} rival={rival} setRival={setRival} tactics={tactics} setTactics={setTactics} onKickOff={kickOff} fee={fee} status={status} />;
   }
 
   const s = sim.current!.state;
@@ -158,6 +227,7 @@ export function Play() {
                             : "Honours even."
                         : "Change your formation or tactics on the right, then start the second half."}
                     </p>
+                    {done && <KickOffNote status={status} />}
                     {done && earned !== null && (
                       <p className="m-0 font-pixel text-[11px] text-amber">+{earned} TRAINING POINT{earned === 1 ? "" : "S"}</p>
                     )}
@@ -168,7 +238,9 @@ export function Play() {
                     )}
                     {done ? (
                       <div className="flex flex-wrap justify-center gap-3">
-                        <button type="button" className={btnPrimary} onClick={kickOff}>REMATCH</button>
+                        <button type="button" className={btnPrimary} onClick={kickOff} disabled={busy}>
+                          {busy ? "KICKING OFF…" : `REMATCH · ${feeLabel(fee)}`}
+                        </button>
                         <button type="button" className={btnGhost} onClick={() => setScreen({ k: "setup" })}>New match</button>
                         {club && <Link to="/club" className={btnGhost}>Train players</Link>}
                       </div>
@@ -192,7 +264,20 @@ export function Play() {
                   {x}×
                 </button>
               ))}
-              <span className="text-[13px] text-muted">Your players decide every touch. You set the plan.</span>
+              {voice.supported && (
+                <button type="button" aria-pressed={voice.on} onClick={voice.toggle} className={`flex min-h-11 items-center gap-2 px-3 text-[13px] ${voice.on ? "bg-amber font-semibold text-bg" : "border border-line bg-surface text-soft"}`}>
+                  <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+                    <path d="M2 6h3l4-3v10l-4-3H2z" fill="currentColor" />
+                    {voice.on ? <path d="M11 5.5a3.5 3.5 0 010 5M12.8 3.5a6.3 6.3 0 010 9" stroke="currentColor" strokeWidth="1.5" fill="none" /> : <path d="M11 6l4 4M15 6l-4 4" stroke="currentColor" strokeWidth="1.5" />}
+                  </svg>
+                  {voice.on ? "Commentary on" : "Voice off"}
+                </button>
+              )}
+              {onChain && (
+                <a href={txUrl(onChain.hash)} target="_blank" rel="noreferrer" className="font-mono text-xs text-muted hover:text-cyan">
+                  Match #{onChain.matchId.toString()} on-chain ↗
+                </a>
+              )}
             </div>
             <Stats s={s} possTotal={possTotal} />
           </section>
@@ -328,7 +413,35 @@ function avoidClash(home: ClubDef, away: ClubDef): ClubDef {
   return { ...away, color: away.trim, trim: away.color };
 }
 
-function Setup({ club, hasClub, rival, setRival, tactics, setTactics, onKickOff }: { club: ClubDef; hasClub: boolean; rival: ClubDef; setRival: (c: ClubDef) => void; tactics: Tactics; setTactics: (t: Tactics) => void; onKickOff: () => void }) {
+function feeLabel(fee: bigint | null) {
+  return fee === null ? "… DOGE" : `${formatEther(fee)} DOGE`;
+}
+
+function KickOffNote({ status }: { status: KickOffStatus }) {
+  if (status.k === "idle") return null;
+  if (status.k === "connect") return <p className="m-0 text-sm text-amber" role="status">Connect your wallet to pay the match fee and kick off.</p>;
+  if (status.k === "confirm") return <p className="m-0 text-sm text-soft" role="status">Confirm the match fee in your wallet…</p>;
+  if (status.k === "mining")
+    return (
+      <p className="m-0 text-sm text-soft" role="status">
+        Fee sent. Waiting for DogeOS to confirm… <a href={txUrl(status.hash)} target="_blank" rel="noreferrer">View ↗</a>
+      </p>
+    );
+  return (
+    <p className="m-0 text-sm text-danger" role="alert">
+      {status.msg}
+      {/faucet/i.test(status.msg) && (
+        <>
+          {" "}
+          <a href={FAUCET} target="_blank" rel="noreferrer">Open the faucet ↗</a>
+        </>
+      )}
+    </p>
+  );
+}
+
+function Setup({ club, hasClub, rival, setRival, tactics, setTactics, onKickOff, fee, status }: { club: ClubDef; hasClub: boolean; rival: ClubDef; setRival: (c: ClubDef) => void; tactics: Tactics; setTactics: (t: Tactics) => void; onKickOff: () => void; fee: bigint | null; status: KickOffStatus }) {
+  const busy = status.k === "confirm" || status.k === "mining";
   const squad = club.squad;
   return (
     <div className="min-h-screen">
@@ -384,7 +497,14 @@ function Setup({ club, hasClub, rival, setRival, tactics, setTactics, onKickOff 
               ))}
               <p className="m-0 text-xs text-muted">Players fill formation slots by role. A formation that needs more defenders than you have will put midfielders at the back.</p>
             </Panel>
-            <button type="button" className={`${btnPrimary} py-4 text-[12px]`} onClick={onKickOff}>KICK OFF</button>
+            <button type="button" className={`${btnPrimary} py-4 text-[12px]`} onClick={onKickOff} disabled={busy}>
+              {busy ? "KICKING OFF…" : `KICK OFF · ${feeLabel(fee)}`}
+            </button>
+            <KickOffNote status={status} />
+            <p className="m-0 text-xs text-muted">
+              Each match costs {feeLabel(fee)} on DogeOS Chikyū testnet. The fee goes to the reward reserve that pays season prizes, and the transaction sets the match seed so the result can be checked.{" "}
+              <a href={FAUCET} target="_blank" rel="noreferrer">Get testnet DOGE ↗</a>
+            </p>
           </section>
         </div>
       </main>

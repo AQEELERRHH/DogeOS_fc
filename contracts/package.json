@@ -6,7 +6,8 @@
   "scripts": {
     "test": "hardhat test",
     "compile": "hardhat compile",
-    "deploy:chikyu": "hardhat run scripts/deploy.js --network dogeosChikyu"
+    "deploy:chikyu": "hardhat run scripts/deploy.js --network dogeosChikyu",
+    "deploy:tickets": "hardhat run scripts/deploy-tickets.js --network dogeosChikyu"
   },
   "keywords": [],
   "author": "",
