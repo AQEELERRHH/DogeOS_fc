@@ -31,3 +31,18 @@ On a network that blocks the solc download, prefix with `LOCAL_SOLC=1` to use th
 If `verify` hangs on "Pending in queue", Ctrl-C and check the explorer (known L2Scan issue).
 
 After deploy: fund the reserve (`fund()` or a plain transfer), then add shop items with `setItem`.
+
+## MatchTickets (DOGE FC match fee)
+
+Every DOGE FC match costs a fixed fee (1 DOGE on testnet). `kickOff(rival)` takes the fee, sends it
+straight to `RewardReserve`, and emits `MatchStarted(matchId, player, rival, seed, fee)`. The web app
+plays the match from that seed, so every match is fixed on-chain before it starts. A single match never
+pays out; the reserve funds season and leaderboard prizes.
+
+Deploy (uses the RewardReserve already in `deployments/dogeosChikyu.json` and adds the new address to it):
+
+```bash
+LOCAL_SOLC=1 npm run deploy:tickets
+```
+
+Owner functions: `setFee`, `setReserve`, `pause`, `unpause`.
