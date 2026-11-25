@@ -109,7 +109,7 @@ function CreateClub() {
             </label>
           ))}
           {tried && errors.players && <span className="text-sm text-danger">{errors.players}</span>}
-          <p className="m-0 text-sm text-muted">You can change names, roles and playing styles later on the club page.</p>
+          <p className="m-0 text-sm text-muted">You can change names and playing styles later on the club page.</p>
         </Panel>
       </div>
 
