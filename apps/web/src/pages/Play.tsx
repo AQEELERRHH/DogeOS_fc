@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
 import {
   CLUBS,
   DEFAULT_TACTICS,
@@ -19,10 +18,11 @@ import {
   type MatchState,
   type Tactics,
   type TacticsInput,
-} from "@aftermaze/football";
+} from "@dogefc/engine";
 import { PitchCanvas } from "../football/PitchCanvas";
+import { FormationDiagram } from "../football/FormationDiagram";
 import type { FrameSource } from "../football/PitchScene";
-import { Eyebrow, Logo, Panel, btnGhost, btnPrimary } from "../components/ui";
+import { Eyebrow, Panel, SiteHeader, btnGhost, btnPrimary } from "../components/ui";
 
 const MY_CLUB = CLUBS[0];
 const RIVALS = CLUBS.slice(1);
@@ -31,7 +31,7 @@ const SPEEDS = [1, 2, 4];
 
 type Screen = { k: "setup" } | { k: "live"; key: string } | { k: "done"; key: string };
 
-export function Football() {
+export function Play() {
   const [screen, setScreen] = useState<Screen>({ k: "setup" });
   const [rival, setRival] = useState<ClubDef>(RIVALS[0]);
   const [tactics, setTactics] = useState<Tactics>({ ...DEFAULT_TACTICS });
@@ -120,12 +120,9 @@ export function Football() {
 
   return (
     <div className="min-h-screen">
-      <header className="border-b border-line2">
-        <div className="mx-auto flex max-w-[1400px] flex-wrap items-center justify-between gap-4 px-5 py-3 sm:px-8">
-          <Logo />
-          <span className="font-mono text-xs text-amber">FOOTBALL PROTOTYPE · friendly match</span>
-        </div>
-      </header>
+      <SiteHeader>
+        <span className="font-mono text-xs text-amber">Friendly vs {rival.name}</span>
+      </SiteHeader>
       <main className="mx-auto flex max-w-[1400px] flex-col gap-5 px-5 pb-10 pt-5 sm:px-8">
         <Scoreboard s={s} />
 
@@ -278,19 +275,6 @@ function Segmented<T extends number>({ label, value, options, onChange }: { labe
   );
 }
 
-function FormationDiagram({ f, active }: { f: FormationKey; active: boolean }) {
-  const def = FORMATIONS[f];
-  return (
-    <div className={`relative aspect-[5/3] w-full border ${active ? "border-cyan" : "border-line"} bg-[#0A2A22]`} aria-hidden="true">
-      <span className="absolute inset-y-0 left-1/2 w-px bg-white/30" />
-      <span className="absolute size-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white" style={{ left: "6%", top: "50%" }} />
-      {def.slots.map((sl, i) => (
-        <span key={i} className="absolute size-3 -translate-x-1/2 -translate-y-1/2 rounded-full" style={{ left: `${sl.x * 100}%`, top: `${sl.y * 100}%`, background: sl.role === "DEF" ? "#22E4F5" : sl.role === "MID" ? "#9B6BFF" : "#FFB020" }} />
-      ))}
-    </div>
-  );
-}
-
 function TacticsEditor({ value, onChange, compact = false }: { value: Tactics; onChange: (t: Tactics) => void; compact?: boolean }) {
   const set = <K extends keyof Tactics>(k: K, v: Tactics[K]) => onChange({ ...value, [k]: v });
   return (
@@ -319,15 +303,10 @@ function Setup({ rival, setRival, tactics, setTactics, onKickOff }: { rival: Clu
   const squad = useMemo(() => MY_CLUB.squad, []);
   return (
     <div className="min-h-screen">
-      <header className="border-b border-line2">
-        <div className="mx-auto flex max-w-[1240px] flex-wrap items-center justify-between gap-4 px-5 py-4 sm:px-8">
-          <Logo />
-          <Link to="/" className="text-sm text-soft">Back to the current game</Link>
-        </div>
-      </header>
+      <SiteHeader />
       <main className="mx-auto flex max-w-[1240px] flex-col gap-6 px-5 pb-14 pt-7 sm:px-8">
         <div className="flex flex-col gap-1.5">
-          <Eyebrow className="text-amber">FOOTBALL PROTOTYPE</Eyebrow>
+          <Eyebrow className="text-amber">FRIENDLY MATCH</Eyebrow>
           <h1 className="m-0 text-3xl font-bold">You're the manager of {MY_CLUB.name}</h1>
           <p className="m-0 max-w-3xl text-soft">Pick a rival, set your formation and tactics, then watch your AI players carry out the plan. Change things from the touchline at any time, and at half-time.</p>
         </div>

@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { GOAL_HALF, LENGTH, WIDTH, type MatchEvent, type MatchState } from "@aftermaze/football";
+import { GOAL_HALF, LENGTH, WIDTH, type MatchEvent, type MatchState } from "@dogefc/engine";
 
 export const PX = 25; // pixels per metre
 const PAD = 16;

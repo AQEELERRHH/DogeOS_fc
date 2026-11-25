@@ -1,107 +1,125 @@
-export interface Vec {
+export interface V2 {
   x: number;
   y: number;
 }
 
-export type Action =
-  | "MOVE_UP"
-  | "MOVE_DOWN"
-  | "MOVE_LEFT"
-  | "MOVE_RIGHT"
-  | "USE_BOMB"
-  | "WAIT"
-  | "ESCAPE";
+export type Role = "GK" | "DEF" | "MID" | "FWD";
 
-export const ACTIONS: readonly Action[] = [
-  "MOVE_UP",
-  "MOVE_DOWN",
-  "MOVE_LEFT",
-  "MOVE_RIGHT",
-  "USE_BOMB",
-  "WAIT",
-  "ESCAPE",
-];
-
-export type Mode = "daily" | "survival" | "special" | "endless" | "training";
-
-export type MatchStatus = "running" | "escaped" | "destroyed" | "timeout";
-export type DeathCause = "enemy" | "collapse" | null;
-
-export type EnemyKind = "seeker" | "sentinel";
-
-export interface Enemy {
-  id: number;
-  kind: EnemyKind;
-  pos: Vec;
-  spawn: Vec;
-  stunnedUntil: number;
-  /** Sentinel patrol route (ping-pong). Empty for seekers. */
-  route: Vec[];
-  routeIndex: number;
-  routeDir: 1 | -1;
-  /** Seeker: last place it saw NOVA (null = never). */
-  lastSeen: Vec | null;
+/** 0–100 each. */
+export interface Attributes {
+  pace: number;
+  passing: number;
+  shooting: number;
+  dribbling: number;
+  tackling: number;
+  positioning: number;
+  /** Goalkeeping: shot stopping. */
+  reflexes: number;
+  stamina: number;
 }
 
-export interface AgentState {
-  pos: Vec;
-  hp: number;
-  bombs: number;
-  collected: number;
-  damageTaken: number;
-  invulnerableUntil: number;
-  /** Most recent passable Echo Trail tiles, oldest first (max 2). */
-  trail: Vec[];
-  /** Last few positions, newest last (for oscillation detection). */
-  recent: Vec[];
+export interface PlayerDef {
+  id: string;
+  name: string;
+  number: number;
+  role: Role;
+  attrs: Attributes;
 }
 
-export interface PendingCollapse {
-  cells: Vec[];
-  axis: "row" | "col";
-  announcedAt: number;
-  at: number;
+export interface ClubDef {
+  id: string;
+  name: string;
+  short: string;
+  color: string;
+  /** Second colour for numbers/trim. */
+  trim: string;
+  /** 5 players: index 0 is the goalkeeper. */
+  squad: PlayerDef[];
+  /** How this club's AI manager likes to play. */
+  style: ManagerStyle;
 }
 
-export interface ScoreBreakdown {
-  crystals: number;
-  bonuses: number;
-  escape: number;
-  stuns: number;
-  noDamage: number;
-  speed: number;
-  total: number;
+export type ManagerStyle = "balanced" | "counter" | "possession" | "gegenpress" | "fortress";
+
+export type Mentality = 0 | 1 | 2 | 3 | 4; // very defensive … very attacking
+export type Level3 = 0 | 1 | 2; // low / medium / high
+
+export interface Tactics {
+  formation: FormationKey;
+  mentality: Mentality;
+  pressing: Level3;
+  /** 0 short & safe … 2 direct & forward. */
+  passing: Level3;
+  width: Level3;
 }
 
-export interface MatchStats {
-  ticks: number;
-  crystals: number;
-  bonuses: number;
-  damageTaken: number;
-  bombsUsed: number;
-  bombsWasted: number;
-  enemiesStunned: number;
-  trailCleared: number;
-  deadEnds: number;
-  oscillations: number;
-  blockedMoves: number;
-  waits: number;
-  distance: number;
-  collapsesSurvived: number;
-  deathCause: DeathCause;
+export type FormationKey = "2-2" | "1-2-1" | "2-1-1" | "3-1" | "1-1-2";
+
+export type Phase = "kickoff" | "play" | "goal" | "halftime" | "fulltime";
+
+export interface PlayerState {
+  idx: number; // 0..9 (team 0: 0-4, team 1: 5-9)
+  team: 0 | 1;
+  slot: number; // 0 = GK, 1..4 formation slots
+  def: PlayerDef;
+  pos: V2;
+  vel: V2;
+  stamina: number; // 0..100 (current energy)
+  cooldown: number; // ticks until next on-ball decision
+  beatenUntil: number; // ticks: lost a tackle / dribbled past
 }
 
-export type GameEvent =
-  | { t: number; type: "crystal"; pos: Vec; remaining: number }
-  | { t: number; type: "bonus"; pos: Vec }
-  | { t: number; type: "exit_open" }
-  | { t: number; type: "trail_crystallised"; pos: Vec }
-  | { t: number; type: "bomb"; pos: Vec; cleared: number; stunned: number[] }
-  | { t: number; type: "hit"; enemyId: number; hp: number }
-  | { t: number; type: "collapse_warning"; cells: Vec[]; at: number }
-  | { t: number; type: "collapse"; cells: Vec[] }
-  | { t: number; type: "collapse_aborted" }
-  | { t: number; type: "invalid_action"; action: Action }
-  | { t: number; type: "escaped" }
-  | { t: number; type: "destroyed"; cause: Exclude<DeathCause, null> }
-  | { t: number; type: "timeout" };
+export interface BallState {
+  pos: V2;
+  vel: V2;
+  owner: number; // player idx or -1
+  lastTouch: number; // player idx or -1
+  flight: null | { kind: "pass" | "shot"; from: number; to: number; tick: number };
+  /** Ignore control attempts by this player until tick (just kicked it). */
+  noTouchBy: number;
+  noTouchUntil: number;
+}
+
+export interface TeamStats {
+  goals: number;
+  shots: number;
+  onTarget: number;
+  passes: number;
+  passesCompleted: number;
+  tackles: number;
+  interceptions: number;
+  saves: number;
+  possessionTicks: number;
+}
+
+export type MatchEvent =
+  | { t: number; type: "kickoff"; team: 0 | 1 }
+  | { t: number; type: "pass"; from: number; to: number; progressive: boolean }
+  | { t: number; type: "pass_complete"; from: number; to: number }
+  | { t: number; type: "shot"; by: number; dist: number; onTarget: boolean }
+  | { t: number; type: "save"; by: number; shooter: number; held: boolean }
+  | { t: number; type: "goal"; by: number; assist: number | null; team: 0 | 1; score: [number, number] }
+  | { t: number; type: "miss"; by: number }
+  | { t: number; type: "tackle"; by: number; on: number; won: boolean }
+  | { t: number; type: "interception"; by: number; from: number }
+  | { t: number; type: "dribble"; by: number; past: number }
+  | { t: number; type: "tactics"; team: 0 | 1; tactics: Tactics; reason: string; byAI: boolean }
+  | { t: number; type: "halftime"; score: [number, number] }
+  | { t: number; type: "fulltime"; score: [number, number] };
+
+export interface MatchConfig {
+  seed: string;
+  home: ClubDef;
+  away: ClubDef;
+  /** Ticks per half at 10 ticks per second. */
+  halfTicks: number;
+  /** Which sides the AI manager controls. */
+  aiControls: [boolean, boolean];
+}
+
+/** A tactical change made by a human manager during the match. Replays re-apply these. */
+export interface TacticsInput {
+  t: number;
+  team: 0 | 1;
+  tactics: Tactics;
+}
