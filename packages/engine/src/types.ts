@@ -5,6 +5,13 @@ export interface V2 {
 
 export type Role = "GK" | "DEF" | "MID" | "FWD";
 
+/** A player's playing style within their role. Changes how the AI behaves. */
+export type PlayerStyle =
+  | "line" | "sweeper" // GK
+  | "stopper" | "cover" // DEF
+  | "playmaker" | "box2box" // MID
+  | "poacher" | "target"; // FWD
+
 /** 0–100 each. */
 export interface Attributes {
   pace: number;
@@ -24,6 +31,8 @@ export interface PlayerDef {
   number: number;
   role: Role;
   attrs: Attributes;
+  /** Optional playing style. Defaults to the role's plain behaviour. */
+  style?: PlayerStyle;
 }
 
 export interface ClubDef {

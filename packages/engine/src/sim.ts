@@ -51,6 +51,8 @@ export interface MatchState {
   tackleReadyAt: number[];
   /** Dribble target for the current carrier. */
   carrierTarget: V2 | null;
+  /** Half-time has been reached (so it fires exactly once, even during a stoppage). */
+  halfDone: boolean;
 }
 
 const emptyStats = (): TeamStats => ({
@@ -122,6 +124,7 @@ export function createMatch(config: MatchConfig, startTactics?: [Tactics | null,
     window: [0, 0],
     tackleReadyAt: new Array(10).fill(0),
     carrierTarget: null,
+    halfDone: false,
   };
   assignSlots(s, 0);
   assignSlots(s, 1);
@@ -238,7 +241,8 @@ function evaluateOptions(s: MatchState, me: PlayerState, rng: Rng): Option {
   const opts: Option[] = [];
 
   // Shoot
-  const range = 4 + a.shooting * 0.12;
+  const st = me.def.style;
+  const range = 4 + a.shooting * 0.12 + (st === "poacher" ? 0.5 : 0);
   if (dGoal < range && me.slot !== 0) {
     let blockers = 0;
     for (const o of opponents(s, me.team)) {
@@ -248,7 +252,8 @@ function evaluateOptions(s: MatchState, me: PlayerState, rng: Rng): Option {
     }
     const angle = Math.abs(me.pos.y - goal.y) / Math.max(1, dGoal); // 0 = straight on
     const xg = clamp(1.1 - dGoal / 13, 0.03, 0.8) * (0.55 + a.shooting / 220) * (1 - Math.min(0.75, blockers * 0.28 + press * 0.12)) * (1 - angle * 0.45);
-    if (xg > 0.1) opts.push({ kind: "shoot", value: xg * 115 * (0.85 + 0.075 * T.mentality) });
+    const shootK = st === "poacher" ? 1.25 : st === "box2box" ? 1.1 : st === "playmaker" ? 0.9 : st === "target" ? 0.8 : st === "stopper" || st === "cover" ? 0.8 : 1;
+    if (xg > 0.1) opts.push({ kind: "shoot", value: xg * 115 * (0.85 + 0.075 * T.mentality) * shootK });
   }
 
   // Pass
@@ -272,6 +277,9 @@ function evaluateOptions(s: MatchState, me: PlayerState, rng: Rng): Option {
     let v = 32 + progress * wProg - risk * wRisk - recvPress * 7 - distPen + threat * 38;
     if (t.slot === 0) v -= 22 + (relX(me.team, me.pos.x) > 0.4 ? 30 : 0);
     if (progress < -4 && P === 2) v -= 8;
+    if (st === "playmaker") v += 8 + Math.max(0, progress) * 0.35;
+    else if (st === "target") v += 7; // lay it off to a runner
+    if (t.def.style === "target" && relX(me.team, t.pos.x) > 0.55) v += 4; // aim for the big man
     opts.push({ kind: "pass", value: v, target: t });
   }
 
@@ -293,7 +301,7 @@ function evaluateOptions(s: MatchState, me: PlayerState, rng: Rng): Option {
   let nearest: PlayerState | null = null;
   for (const o of opponents(s, me.team)) if (!nearest || dist(o.pos, me.pos) < dist(nearest.pos, me.pos)) nearest = o;
   const away = nearest ? norm(sub(me.pos, nearest.pos)) : { x: dir(me.team), y: 0 };
-  opts.push({ kind: "hold", value: 16 - press * 6, point: add(me.pos, mul(away, 2)) });
+  opts.push({ kind: "hold", value: 16 - press * (st === "target" ? 3 : 6) + (st === "target" ? 8 : 0), point: add(me.pos, mul(away, 2)) });
 
   let best = opts[0];
   let bestV = -Infinity;
@@ -339,7 +347,8 @@ function kickShot(s: MatchState, me: PlayerState, rng: Rng) {
   const aimSide = keeper.pos.y < goal.y ? 1 : -1;
   const aimY = goal.y + aimSide * GOAL_HALF * 0.62;
   const press = pressureOn(s, me);
-  const errY = (rand(rng) * 2 - 1) * (((100 - a.shooting) / 100) * 2.6 + d * 0.11 + press * 0.7);
+  const finish = me.def.style === "poacher" && d < 9 ? 0.82 : me.def.style === "target" ? 1.08 : 1;
+  const errY = (rand(rng) * 2 - 1) * (((100 - a.shooting) / 100) * 2.6 + d * 0.11 + press * 0.7) * finish;
   const lineY = aimY + errY;
   const target = { x: goal.x, y: lineY };
   const v0 = 2.2 + a.shooting * 0.008;
@@ -358,7 +367,7 @@ function kickShot(s: MatchState, me: PlayerState, rng: Rng) {
   for (const o of opponents(s, me.team)) {
     if (o.slot === 0 || s.tick < o.beatenUntil) continue;
     const { d: pd, s: along } = segDist(o.pos, me.pos, target);
-    if (pd < 1.0 && along > 0.05 && along < 0.8 && rand(rng) < 0.3 + o.def.attrs.positioning / 400) {
+    if (pd < 1.0 && along > 0.05 && along < 0.8 && rand(rng) < 0.3 + o.def.attrs.positioning / 400 + (o.def.style === "cover" ? 0.08 : 0)) {
       s.events.push({ t: s.tick, type: "interception", by: o.idx, from: me.idx });
       s.stats[o.team].interceptions++;
       s.ball.pos = add(o.pos, mul(norm(sub(me.pos, o.pos)), 0.6));
@@ -392,7 +401,8 @@ function kickShot(s: MatchState, me: PlayerState, rng: Rng) {
     s.shot = { result: "goal", keeper: keeper.idx, atTick: s.tick + n, held: false, shooter: me.idx, lineY };
     return;
   }
-  const ps = clamp(0.8 + (kA.reflexes - 60) / 100 - (v0 - 2.4) * 0.35 + (need < 1 ? 0.08 : 0) - 0.25 * (need / reach) - Math.max(0, 8 - d) * 0.03, 0.15, 0.94);
+  const kStyle = keeper.def.style === "line" ? 0.03 : keeper.def.style === "sweeper" ? -Math.max(0, d - 10) * 0.006 : 0;
+  const ps = clamp(0.8 + kStyle + (kA.reflexes - 60) / 100 - (v0 - 2.4) * 0.35 + (need < 1 ? 0.08 : 0) - 0.25 * (need / reach) - Math.max(0, 8 - d) * 0.03, 0.15, 0.94);
   const saved = rand(rng) < ps;
   s.shot = {
     result: saved ? "save" : "goal",
@@ -413,7 +423,8 @@ function targetFor(s: MatchState, p: PlayerState, attacking: boolean): { point: 
   const h = slotHome(s, p);
 
   if (p.slot === 0) {
-    const out = bx < 0.35 ? 0.07 : 0.04;
+    const sweeper = p.def.style === "sweeper";
+    const out = sweeper ? (bx < 0.35 ? 0.1 : 0.16) : bx < 0.35 ? 0.07 : 0.04;
     const gy = clamp(0.5 + (by - 0.5) * 0.35, 0.5 - (GOAL_HALF - 0.3) / WIDTH, 0.5 + (GOAL_HALF - 0.3) / WIDTH);
     return { point: toPitch(p.team, { x: out * LENGTH, y: gy * WIDTH }), sprint: bx < 0.3 };
   }
@@ -421,20 +432,32 @@ function targetFor(s: MatchState, p: PlayerState, attacking: boolean): { point: 
   const widthK = 0.75 + 0.22 * T.width;
   if (attacking) {
     let x = h.x + (T.mentality - 2) * 0.06 + (bx - 0.45) * 0.35;
-    const y = 0.5 + (h.y - 0.5) * widthK;
     const role = FORMATIONS[T.formation].slots[p.slot - 1].role;
-    if (role === "FWD" && bx > 0.3) {
+    const st = p.def.style;
+    if (st === "target") x -= 0.06;
+    else if (st === "box2box") x += 0.06;
+    else if (st === "playmaker") x -= 0.04;
+    else if (st === "stopper") x += 0.03;
+    else if (st === "cover") x -= 0.04;
+    if (role === "FWD" && bx > 0.3 && st !== "target") {
       // Run in behind: stay just beyond the deepest outfield defender.
       const defenders = opponents(s, p.team).filter((o) => o.slot !== 0);
       const deepest = Math.max(...defenders.map((o) => relX(p.team, o.pos.x)));
-      x = Math.max(x, Math.min(0.9, deepest + 0.04));
+      x = Math.max(x, Math.min(0.9, deepest + (st === "poacher" ? 0.06 : 0.04)));
     }
+    let y = 0.5 + (h.y - 0.5) * widthK;
+    if (st === "playmaker") y = 0.5 + (y - 0.5) * 0.6;
     x = clamp(x, 0.08, 0.92);
-    return { point: toPitch(p.team, { x: x * LENGTH, y: y * WIDTH }), sprint: role === "FWD" && bx > 0.35 };
+    return { point: toPitch(p.team, { x: x * LENGTH, y: y * WIDTH }), sprint: (role === "FWD" && bx > 0.35 && st !== "target") || (st === "box2box" && bx > 0.55) };
   }
 
   // Defending: compact block that slides with the ball.
+  const dst = p.def.style;
   let x = h.x * 0.72 + (T.mentality - 2) * 0.05 + (bx - 0.5) * 0.28 - 0.02 + T.pressing * 0.03;
+  if (dst === "poacher") x += 0.08; // stays high for the counter
+  else if (dst === "stopper") x += 0.03;
+  else if (dst === "cover") x -= 0.04;
+  else if (dst === "playmaker") x -= 0.02;
   let y = (0.5 + (h.y - 0.5) * (widthK - 0.15)) * 0.62 + by * 0.38;
   x = clamp(x, 0.06, 0.8);
   let point = toPitch(p.team, { x: x * LENGTH, y: y * WIDTH });
@@ -466,8 +489,9 @@ export function step(s: MatchState, inputs: TacticsInput[] = []): MatchState {
       if (s.phase === "halftime") setupKickoff(s, 1);
       else setupKickoff(s, s.kickoffTeam);
     }
-    s.tick++;
     s.rng = rng.state;
+    // The clock keeps running during stoppages, so half-time and full-time still trigger.
+    advanceClock(s);
     return s;
   }
   if (s.phase === "kickoff" && s.tick >= s.phaseUntil) s.phase = "play";
@@ -484,7 +508,7 @@ export function step(s: MatchState, inputs: TacticsInput[] = []): MatchState {
   const chasers = new Set<number>();
   const predicted = add(ball.pos, mul(ball.vel, 4));
   for (const team of [0, 1] as const) {
-    const pool = s.players.filter((p) => p.team === team && s.tick >= p.beatenUntil && (p.slot !== 0 || relX(team, predicted.x) < 0.18));
+    const pool = s.players.filter((p) => p.team === team && s.tick >= p.beatenUntil && (p.slot !== 0 || relX(team, predicted.x) < (p.def.style === "sweeper" ? 0.28 : 0.18)));
     if (!owner) {
       if (ball.flight?.kind === "pass" && teamOf(ball.flight.from) === team) {
         chasers.add(ball.flight.to);
@@ -500,6 +524,7 @@ export function step(s: MatchState, inputs: TacticsInput[] = []): MatchState {
       if (depth < engage || dist(outfield[0]?.pos ?? owner.pos, owner.pos) < 3) {
         if (outfield[0]) chasers.add(outfield[0].idx);
         if (T.pressing === 2 && outfield[1] && depth > 0.45) chasers.add(outfield[1].idx);
+        else if (outfield[1]?.def.style === "box2box" && depth > 0.5 && dist(outfield[1].pos, owner.pos) < 6) chasers.add(outfield[1].idx);
       }
     }
   }
@@ -565,7 +590,7 @@ export function step(s: MatchState, inputs: TacticsInput[] = []): MatchState {
       if (s.tick < d.beatenUntil || s.tick < s.tackleReadyAt[d.idx]) continue;
       if (dist(d.pos, c.pos) > 1.1) continue;
       s.tackleReadyAt[d.idx] = s.tick + 6;
-      const pWin = clamp(0.36 + (d.def.attrs.tackling - c.def.attrs.dribbling) / 170 - c.cooldown * 0, 0.12, 0.8);
+      const pWin = clamp(0.36 + (d.def.attrs.tackling - c.def.attrs.dribbling) / 170 + (d.def.style === "stopper" ? 0.06 : 0), 0.12, 0.8);
       if (rand(rng) < pWin) {
         s.stats[d.team].tackles++;
         s.events.push({ t: s.tick, type: "tackle", by: d.idx, on: c.idx, won: true });
@@ -717,7 +742,8 @@ export function step(s: MatchState, inputs: TacticsInput[] = []): MatchState {
 function advanceClock(s: MatchState) {
   s.tick++;
   const H = s.config.halfTicks;
-  if (s.tick === H) {
+  if (!s.halfDone && s.tick >= H) {
+    s.halfDone = true;
     s.phase = "halftime";
     s.phaseUntil = s.tick + 30;
     s.events.push({ t: s.tick, type: "halftime", score: [...s.score] as [number, number] });
