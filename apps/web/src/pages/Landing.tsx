@@ -61,6 +61,7 @@ export function Landing() {
             ["Set your plan", "Choose a formation, then your mentality, pressing, passing style and width. Every choice changes how your players behave."],
             ["Shout from the touchline", "Losing? Change the formation or go all-out attack mid-match. The half-time break gives you time to rethink."],
             ["Read the game", "Live commentary and stats show what's working. Your rival's manager reacts to you, so you have to react back."],
+            ["Build your club", "Name your club and players, pick your kit, give each player a style like poacher or sweeper keeper, and spend the points you earn on training."],
           ].map(([t, b], i) => (
             <div key={t} className="flex flex-col gap-3.5 border border-line bg-surface p-7">
               <span className="font-pixel text-lg text-cyan">{i + 1}</span>
@@ -131,7 +132,7 @@ export function Landing() {
               <span className="size-10 shrink-0 border-2" style={{ background: c.color, borderColor: c.trim }} aria-hidden="true" />
               <div className="flex flex-col gap-0.5">
                 <span className="text-lg font-semibold">{c.name}</span>
-                <span className="text-sm text-soft">{c.id === "doge-fc" ? "Your club" : STYLE_LABEL[c.style]}</span>
+                <span className="text-sm text-soft">{c.id === "doge-fc" ? "Demo squad" : STYLE_LABEL[c.style]}</span>
               </div>
             </div>
           ))}
@@ -145,8 +146,6 @@ export function Landing() {
         </div>
         <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(230px,1fr))]">
           {[
-            ["Train your players", "Drills that build finishing, passing, reflexes and stamina, plus roles like sweeper keeper or playmaker."],
-            ["Your own club", "Name your club, pick your colours and build your squad."],
             ["A league season", "Play the AI clubs home and away and climb the table."],
             ["Manager vs manager", "Your trained club against other players' clubs. Nobody needs to be online at the same time."],
             ["DOGE on DogeOS", "Kits and cosmetics paid in DOGE, and prizes from an on-chain reserve. Never pay-to-win."],
