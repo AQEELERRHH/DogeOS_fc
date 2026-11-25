@@ -90,9 +90,23 @@ export function Play() {
       startMatch(`dev:${Date.now()}`);
       return;
     }
-    if (!TICKETS_ADDRESS || fee === null) {
+    if (!TICKETS_ADDRESS) {
       setStatus({ k: "error", msg: "The match contract isn't available right now. Try again in a moment." });
       return;
+    }
+    // The fee is read when the page opens. If that read failed (a network blip), try again now.
+    let price = fee;
+    if (price === null) {
+      try {
+        price = await readFee();
+        setFee(price);
+      } catch {
+        price = null;
+      }
+      if (price === null) {
+        setStatus({ k: "error", msg: "Couldn't reach DogeOS to read the match fee. Check your connection and try again." });
+        return;
+      }
     }
     if (!wallet.connected || !wallet.address || !wallet.provider) {
       setStatus({ k: "connect" });
@@ -104,7 +118,7 @@ export function Play() {
       const { hash, receipt } = await writeAndWait(
         wallet.provider,
         wallet.address,
-        { address: TICKETS_ADDRESS, abi: ticketsAbi, functionName: "kickOff", args: [rivalId(rival.id)], value: fee },
+        { address: TICKETS_ADDRESS, abi: ticketsAbi, functionName: "kickOff", args: [rivalId(rival.id)], value: price },
         (h) => setStatus({ k: "mining", hash: h }),
       );
       const m = matchFromReceipt(receipt);
