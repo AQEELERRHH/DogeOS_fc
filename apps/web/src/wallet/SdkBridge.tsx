@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   WalletConnectProvider,
   getChains,
@@ -20,18 +20,25 @@ function Bridge({ onChange }: { onChange: (s: WalletState) => void }) {
   const wc = useWalletConnect();
   const acct = useAccount();
   const address = (acct.address || null) as `0x${string}` | null;
+  // The SDK may hand back new function objects on every render: keep the latest in refs
+  // and only publish when the actual wallet state changes (avoids an update loop).
+  const fns = useRef({ openModal: wc.openModal, disconnect: wc.disconnect });
+  fns.current = { openModal: wc.openModal, disconnect: wc.disconnect };
+  const connected = wc.isConnected && !!address;
+  const error = wc.error ? String(wc.error) : null;
+  const provider = connected ? acct.currentProvider ?? null : null;
   useEffect(() => {
     onChange({
       loading: false,
-      connected: wc.isConnected && !!address,
-      connecting: wc.isConnecting,
-      address: wc.isConnected ? address : null,
-      provider: wc.isConnected ? acct.currentProvider ?? null : null,
-      error: wc.error ? String(wc.error) : null,
-      openModal: wc.openModal,
-      disconnect: () => void wc.disconnect(),
+      connected,
+      connecting: !!wc.isConnecting,
+      address: connected ? address : null,
+      provider,
+      error,
+      openModal: () => fns.current.openModal(),
+      disconnect: () => void fns.current.disconnect(),
     });
-  }, [wc.isConnected, wc.isConnecting, wc.error, wc.openModal, wc.disconnect, address, acct.currentProvider, onChange]);
+  }, [connected, wc.isConnecting, error, address, provider, onChange]);
   return null;
 }
 
@@ -44,8 +51,8 @@ export default function SdkBridge({ onChange }: { onChange: (s: WalletState) => 
       clientId: CLIENT_ID,
       defaultConnectChain: "evm" as WalletConnectKitConfig["defaultConnectChain"],
       metadata: {
-        name: "AFTERMAZE",
-        description: "Train one autonomous agent and send it into THE GRID.",
+        name: "DOGE FC",
+        description: "Manage a squad of AI footballers on DogeOS.",
         url: window.location.origin,
         icons: [`${window.location.origin}/favicon.svg`],
       },

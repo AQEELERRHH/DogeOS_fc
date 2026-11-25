@@ -1,5 +1,5 @@
 {
-  "name": "@aftermaze/web",
+  "name": "@dogefc/web",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -9,7 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@aftermaze/engine": "*",
+    "@dogefc/engine": "*",
     "@dogeos/dogeos-sdk": "^4.1.0",
     "@tanstack/react-query": "^5.108.4",
     "phaser": "^3.90.0",

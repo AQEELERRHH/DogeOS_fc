@@ -1,11 +1,14 @@
 {
-  "name": "aftermaze",
+  "name": "doge-fc",
   "private": true,
-  "workspaces": ["packages/*", "apps/*"],
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
   "scripts": {
-    "dev": "npm run dev -w @aftermaze/web",
-    "build": "npm run build -w @aftermaze/web",
-    "test": "npm run test -w @aftermaze/engine",
-    "simulate": "npm run simulate -w @aftermaze/engine --"
+    "dev": "npm run dev -w @dogefc/web",
+    "build": "npm run build -w @dogefc/web",
+    "test": "npm run test -w @dogefc/engine",
+    "sim": "npm run sim -w @dogefc/engine --"
   }
 }

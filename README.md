@@ -1,63 +1,34 @@
-# AFTERMAZE
+# DOGE FC
 
-Single-player autonomous-agent maze survival game on DogeOS. You train one robot, NOVA, and send it into THE GRID. It plays on its own.
+**You manage. They play.** A 5-a-side football manager game on DogeOS. You set the formation and tactics for a squad of AI footballers, shout instructions from the touchline, and watch your players carry out the plan on their own.
 
 ```
-aftermaze/
-├── apps/web/           Playable web app: React + Phaser + Tailwind (Vite). Runs the engine in a Web Worker.
-├── contracts/          Solidity (Hardhat): AgentRegistry, MazeEconomy, RewardReserve, MatchResults
-│                       Deployed + verified on DogeOS Chikyū (see contracts/deployments/)
-└── packages/engine/    Standalone TypeScript game engine + NOVA's brain (no Phaser, runs in Node or browser)
+doge-fc/
+├── apps/web/          Web app: React + Phaser + Tailwind (Vite). Deployed on Vercel.
+├── packages/engine/   Deterministic 5-a-side match engine (TypeScript, no browser needed)
+└── contracts/         Solidity (Hardhat), deployed on DogeOS Chikyū
 ```
 
-## Run the web app
+## Play locally
 
 ```bash
-npm install          # from the repo root (npm workspaces)
-npm run dev          # http://localhost:5173
-npm run build        # production build → apps/web/dist
-```
-
-Deploys on Vercel from the repo root using `vercel.json` (no settings to change).
-Current version: everything is saved in the browser (localStorage). Wallet login, DOGE purchases,
-server-side match verification and reward claims are the next steps.
-
-## Engine (`packages/engine`)
-
-| File | What it does |
-|---|---|
-| `config.ts` | Modes (daily, survival, special, endless, training), difficulty curve by level, Special Mazes |
-| `maze.ts` | Seeded maze generation: braided corridors, 3 spread-out crystals, exit, bonuses, Sentinel routes, Seeker spawns |
-| `sim.ts` | One tick at a time: Echo Trail, pulse bombs, Seeker/Sentinel AI, hits, validated collapses, scoring |
-| `agent/brain.ts` | Rules-based decision engine (weighted A*, threat maps, dead-end awareness, bomb logic). Every action comes with a plain-English reason. |
-| `agent/policy.ts` | 4 personalities, 5 behaviour weights, append-only policy versions, rollback |
-| `agent/learning.ts` | Experience-replay learning: replays recent mazes with bounded adjustments, keeps only what helps |
-| `agent/coaching.ts` | Plain-language coaching → behaviour changes (never executes input) |
-| `match.ts` / `replay.ts` | Full match runner, Endless Grid, compact replays, keccak256 replay hash (for `MatchResults`) |
-
-### Rules as implemented
-- **Echo Trail:** the 2 most recent tiles stay passable; older ones crystallise and block NOVA and enemies for 30 ticks, unless bombed.
-- **Pulse bombs:** 2 per match, radius 2. They clear crystallised trail and stun enemies for 12 ticks (+50 points each).
-- **Seeker:** chases at full speed within its sight range. Out of sight, it creeps to where it last saw NOVA.
-- **Sentinel:** patrols a straight corridor back and forth. Its corridor always has a way around.
-- **Collapse:** a warning 24 ticks ahead, then a corridor segment closes. It's re-checked at closing time and skipped if it would make the maze unsolvable.
-- **Hits:** 3 HP. Each hit gives a short grace period.
-- **Scoring:** crystal 100, bonus 25, escape 250, stun 50, no-damage 200, speed up to 150.
-
-### Commands
-```bash
-cd packages/engine
 npm install
-npm test                                              # 19 tests
-npm run simulate -- --personality survivor --matches 10 --level 3
-npm run simulate -- --seed demo --watch --matches 1   # board printed every tick
-npm run simulate -- --coach "avoid enemies and stop wasting bombs"
-npm run simulate -- --same-maze --seed daily-x --matches 6   # watch NOVA adapt to one maze
+npm run dev        # http://localhost:5173
+npm test           # engine tests
+npm run sim        # balance report: formations, tactics and clubs over many matches
 ```
 
-### Measured behaviour (40 mazes per cell, untrained agents)
-| Level | 1 | 3 | 5 | 8 | 12 |
-|---|---|---|---|---|---|
-| Escape rate | ~78% | ~63% | ~36% | ~16% | ~5% |
+## The match engine (`packages/engine`)
 
-A match takes ~30–65 ms to simulate, so the server can re-run every match to check it.
+- **Pitch:** 40 × 24 m walled cage, 5 m goals, 10 ticks per second, two 90-second halves (a "40-minute" match).
+- **Players** decide every moment between passing, shooting, dribbling, holding, pressing, marking and covering. Choices depend on their attributes (pace, passing, shooting, dribbling, tackling, positioning, reflexes, stamina), positions and team tactics.
+- **Tactics:** five formations (2-2, 1-2-1, 2-1-1, 3-1, 1-1-2), mentality, pressing, passing style and width. They can be changed mid-match and are recorded so a match replays exactly.
+- **AI managers** for the four rival clubs react to the score, the clock and the opponent's tactics.
+- **Commentary** is rule-based and deterministic.
+- **Deterministic:** same seed and same instructions give the same match, so results can be verified server-side.
+
+All clubs and players are fictional.
+
+## Contracts
+
+`contracts/` holds the first contract set (registry, shop, reward reserve, match results) deployed on DogeOS Chikyū, with addresses in `contracts/deployments/dogeosChikyu.json`. They were written for the earlier maze prototype and will be adapted and redeployed for the DOGE FC economy (kits and cosmetics in DOGE, prizes from an on-chain reserve, no pay-to-win).
