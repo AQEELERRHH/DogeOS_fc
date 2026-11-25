@@ -1,10 +1,11 @@
-import type { Attributes, ClubDef, ManagerStyle, PlayerDef, Role, Tactics } from "./types";
+import type { Attributes, ClubDef, ManagerStyle, PlayerDef, PlayerStyle, Role, Tactics } from "./types";
 
 const A = (pace: number, passing: number, shooting: number, dribbling: number, tackling: number, positioning: number, reflexes: number, stamina: number): Attributes => ({
   pace, passing, shooting, dribbling, tackling, positioning, reflexes, stamina,
 });
 
-const P = (id: string, name: string, number: number, role: Role, attrs: Attributes): PlayerDef => ({ id, name, number, role, attrs });
+const P = (id: string, name: string, number: number, role: Role, attrs: Attributes, style?: PlayerStyle): PlayerDef =>
+  style ? { id, name, number, role, attrs, style } : { id, name, number, role, attrs };
 
 /** All clubs and players are invented. */
 export const CLUBS: ClubDef[] = [
